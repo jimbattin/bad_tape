@@ -1,0 +1,13 @@
+[project]
+name = "bad-tape-tools"
+version = "0.1.0"
+description = "Python tools for the Bad Tape pedal (daisy/tools/, tools/)"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.4.6",
+    "pyusb",    # daisy/tools/usb_log.py
+    "scipy>=1.17.1",
+]
+
+[tool.uv]
+package = false

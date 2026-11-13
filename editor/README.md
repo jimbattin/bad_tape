@@ -1,0 +1,41 @@
+# Bad Tape pedal editor
+
+Browser editor for the Bad Tape pedal (`../daisy/`, HotHouse), over the pedal's USB MIDI link (`daisy/src/link.h`, `docs/MIDI.md`). Bun + TypeScript + Preact, plain CSS (`src/badtape.css`); Web MIDI with SysEx, so Chrome (served from `localhost` or HTTPS). The pedal owns all state; the editor shows and changes it. The look is a dark take on Apple's Rhapsody (OPENSTEP with Mac OS 8 Platinum): a pinstriped title bar, 1 px bevels, etched group boxes, Platinum tabs, a lavender accent; sliders for continuous values, bevel-button groups for choices (and for the digital delay's 8-bit invert mask, one toggle per bit, bit 8 = the MSB first), one row per parameter. Every size except the 1 px bevels and the EQ graph is in `rem`, so the root `font-size` in `badtape.css` (125 %, so 1rem = 20 px) scales the whole editor, its 1500 px maximum width and its breakpoints included. The factory and saved columns need a window about 1490 px wide at that scale.
+
+- Pedal sidebar: the pedal's own controls, editable (switches SW1-SW3, FS1 bypass, the six knobs labelled with what their primary slots drive, with the selected algorithm's Space and the selected delay type's color, and under each knob its FS2 parameter and value). An edit is a MIDI write (`docs/MIDI.md` "Arbitration"): the pedal holds it until the knob moves more than 3 % or the switch changes position, and FS1 toggles from whatever the editor set. An "Editor" badge marks each knob or switch the pedal still holds at the editor's value. Below them, the CPU load as a bar (from the pedal's once-a-second `load avg …` log line) with the peak marked and an overload lamp for dropouts.
+- Delay, Plate, Hall, Canyon and EQ pages: every parameter that has no switch or footswitch, one row each with its slider or choice buttons and three values: the current value, the factory default (the firmware table) and the saved power-up value (kept in the pedal's flash; the last two hide in a narrow window, and the current value's tooltip shows them); a green lamp when the current value is the power-up value, amber when edited. Edits reach the pedal within 20 ms. Per parameter: Save, ↺ Saved, ↺ Factory, Clear (forget the saved value); in the toolbar the same for every parameter at once. A parameter on a knob's primary slot carries a K1-K6 badge and has no lamp: a value set here holds until the knob moves more than 3 %, and at power-up the knob sets it, so Save and ↺ Saved are off (and the toolbar skips it). A parameter that the reverb's Space macro writes carries a Space badge: a saved value holds until Space moves more than 3 %; on a knob slot it is the knob's, and the macro no longer writes it. Every parameter stays editable whatever the pedal's switches select: the tab lamps mark the active reverb algorithm, the delay (when SW1 is not off) and the EQ (when on), and the sections not in use (delay types SW2 does not select, the EQ's bands while it is off) say "not selected on pedal".
+- Knobs page (between EQ and Log): what each knob drives, a menu per slot: Primary (FS2 up) and FS2 (FS2 held) for knobs 1-6, from every parameter not on a switch or FS1 ("Space (active reverb)" follows SW3; "None" drives nothing). The slots save and recall like any parameter (Save stores the power-up layout); "Factory layout" sets all twelve back to the factory knobs and no FS2 parameters. On the pedal, holding FS2 and turning a knob sets its FS2 parameter; that knob's primary keeps its value until the knob moves more than 3 % again with FS2 up.
+- Sliders: drag the thumb (Shift: 10× finer) or press the track to jump; arrow keys step 1 %, Page Up/Down 10 %, Home/End go to the ends; double-click resets to the factory default.
+- EQ page: above the parameters, the EQ's response graph (`src/components/EqGraph.tsx`) from its model (`src/eqModel.ts`, `docs/EQ.md`: the pedal's exact digital response), with the PRE/POST/OFF state, each band's curve, and a handle per band (L, 1, 2, 3, H; a shelf's at its half-gain frequency): drag for gain and frequency (the handle keeps its offset from the pointer, so pressing it moves nothing); the mouse wheel over a bell narrows (up) or widens (down) it; double-click resets the gain; on the focused handle, ←/→ step the frequency by 1/6 octave (Shift: 1/24), ↑/↓ the gain by 0.5 dB (Shift: 0.1), Page Up/Down a bell's Q, Home resets the gain. Hovering reads out the frequency and gain.
+- Log: the pedal's log lines.
+
+The editor picks the first MIDI port whose name contains "Daisy"; the toolbar's In and Out menus select others. Close the tab before `daisy/tools/flash_when_ready.sh`, which needs the MIDI port.
+
+## Source
+
+| Path              | Contents                                                                                                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/protocol.ts` | The SysEx frames (`daisy/src/link.h`): encoders, `parseMessage`, the status log line.                                                                                                                     |
+| `src/link.ts`     | `PedalLink`: Web MIDI ports, HELLO keep-alive, link status, throttled and paced sends.                                                                                                                    |
+| `src/state.ts`    | The reducer: the pedal's table, current and saved values, local edits, switch and primary-knob overrides, the log.                                                                                        |
+| `src/usePedal.ts` | The link's lifecycle in one hook: the sync on (re)link and on a boot line, the DUMP/SAVED? retries, the SAVE/CLEAR round trip.                                                                            |
+| `src/values.ts`   | The parameter lookup by name, tapers, 14-bit codes, enum indices and the readouts (a port of `daisy/src/params.h`).                                                                                       |
+| `src/layout.ts`   | Tabs of sections of rows, the reverb tabs in `reverb_algo` order; `unplacedRows` puts any saveable parameter it misses in an "Other" section of its group's tab.                                          |
+| `src/knobs.ts`    | The knob slots (a port of `params.h` `ResolveSlot`): what each slot drives, the assignment menus and their labels.                                                                                        |
+| `src/eqModel.ts`  | The EQ's model (five RBJ sections at 96 kHz) and its bands' parameters, for the response graph.                                                                                                           |
+| `src/App.tsx`     | The window: toolbar, pedal sidebar, tabs, store actions, status bar.                                                                                                                                      |
+| `src/components/` | `FrontPanel`, `ParamSection`/`ParamRow`, `AssignSelect`, `BitMask`, `EqGraph`, `LogView`, `TabNav`, `Toolbar`, `CpuMeter`, `StatusLine`, and the shared pieces `Slider`, `Segmented`, `GroupBox`, `Lamp`. |
+| `src/badtape.css` | All styling: theme variables, the shared bevels (`--rh-raised`, `--rh-sunken`), then one section per part of the window.                                                                                  |
+
+## Build and run (from the repo root)
+
+Needs Bun (tested with 1.4.4). Each target runs `bun install --frozen-lockfile` first when `package.json` or `bun.lock` changed.
+
+```sh
+make -C editor serve          # dev server with hot reload, http://localhost:3000/ (PORT=… to change)
+make -C editor html           # self-contained single file: editor/dist/editor.html
+make -C editor test check     # bun test; tsc and Biome (lint, format, import order)
+make -C editor fmt            # Biome's safe fixes and formatting
+```
+
+`src/layout.test.ts` reads `docs/MIDI.md`: every parameter on no switch or FS1 must appear once in `src/layout.ts`, and the Space marks must be the Arbitration section's link pairs.
