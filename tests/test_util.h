@@ -1,6 +1,7 @@
-// Helpers shared by the test files: sample counts, test signals, levels, a click measure, a tone's amplitude, an engine
-// rig with the engine render and the delay rig built on it, the color scopes' loop probe, a rig running one reverb
-// algorithm on its own zeroed pool, an RT60 measure and the checks every reverb algorithm meets.
+// Helpers shared by the test files: sample counts, test signals, levels, a click measure, a normalised correlation, a
+// tone's amplitude, an engine rig with the engine render and the delay rig built on it, the color scopes' loop probe, a
+// rig running one reverb algorithm on its own zeroed pool, an RT60 measure and the checks every reverb algorithm
+// meets.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -92,6 +93,18 @@ inline float Click(const std::vector<float>& y, size_t from = 0) {
     for (size_t i = std::max<size_t>(from, 2); i < y.size(); ++i)
         m = std::max(m, std::fabs(y[i] - 2.0f * y[i - 1] + y[i - 2]));
     return m;
+}
+
+// Normalised correlation of a[0, n) (read backwards if reverseA) with b[0, n).
+inline double Corr(const float* a, const float* b, size_t n, bool reverseA) {
+    double ab = 0.0, aa = 0.0, bb = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const double va = a[reverseA ? n - 1 - i : i], vb = b[i];
+        ab += va * vb;
+        aa += va * va;
+        bb += vb * vb;
+    }
+    return ab / std::sqrt(aa * bb);
 }
 
 // The amplitude of y[from, to) at hz (Goertzel; a sine of peak a reads a).

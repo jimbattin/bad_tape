@@ -32,7 +32,7 @@ Each toggle has three positions (up / middle / down):
 
 |Switch|Up|Middle|Down|
 |---|---|---|---|
-|SW1: delay direction|Forward|Off: no new input, repeats ring out|Reverse: every repeat plays backwards|
+|SW1: delay direction|Forward|Off: no new input, repeats ring out|Reverse: every repeat plays backwards, and sound on sound too|
 |SW2: delay type|Digital: clean, knob 6 adds bitcrush|Tape: wow, flutter, saturation; knob 6 ages the tape|BBD: dark, clocked repeats; knob 6 degrades the samples|
 |SW3: reverb|Canyon: deep, modulated (after the Eventide H3000 Breathing Canyon)|Hall: large, smooth (after the Lexicon 480L Random Hall)|Plate: bright, dense (after the Lexicon 224XL Rich Plate)|
 

@@ -43,8 +43,9 @@ template <int Position> struct EqStage : EngineRig {
 // on the input, delay_tape_scope / delay_bbd_scope all, and in the loop, repeats; the bitcrush at its maximum on the
 // input, delay_crush_scope all, and in the loop, delay_crush_scope repeats) and the BBD at color 0; SW1 down (reverse
 // grains); the Plate (SW3 down) and the Canyon (SW3 up); the EQ on, pre and post; sound on sound on in overdub (the
-// rig's short line clamps the loop to 0.34 s) and in 501. NoClickOnParamJump also jumps delay_type 0 -> 2 (SW2) and
-// reverb_algo 0 -> 2 (SW3) on every stage, and every EQ parameter with the EQ live in both places.
+// rig's short line clamps the loop to 0.34 s) and in 501, and on in 301, 501 and overdub with SW1 down (the SOS reverse
+// grains). NoClickOnParamJump also jumps delay_type 0 -> 2 (SW2) and reverb_algo 0 -> 2 (SW3) on every stage, and
+// every EQ parameter with the EQ live in both places.
 using StageTypes =
     ::testing::Types<Stage<-1, 0>, Stage<kDelayColor, 100>, Stage<kDelayColor, 100, kDelayTapeScope, 0>,
                      Stage<kDelayType, 2, kDelayColor, 100>,
@@ -52,7 +53,9 @@ using StageTypes =
                      Stage<kDelayType, 0, kDelayColor, 100>, Stage<kDelayType, 0, kDelayColor, 100, kDelayBbdScope, 0>,
                      Stage<kDelayMode, 0>, Stage<kReverbAlgo, 0>, Stage<kReverbAlgo, 2>, EqStage<0>, EqStage<1>,
                      Stage<kDelaySosMode, 3, kDelaySos, 1, kDelaySosFeedback, 50>,
-                     Stage<kDelaySosMode, 2, kDelaySos, 1>>;
+                     Stage<kDelaySosMode, 2, kDelaySos, 1>, Stage<kDelaySosMode, 1, kDelaySos, 1, kDelayMode, 0>,
+                     Stage<kDelaySosMode, 2, kDelaySos, 1, kDelayMode, 0>,
+                     Stage<kDelaySosMode, 3, kDelaySos, 1, kDelayMode, 0>>;
 
 // Processes in[from, to) into out in chunks of block.
 template <class S> void Run(S& s, const std::vector<float>& in, std::vector<float>& out, size_t from, size_t to,
