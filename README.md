@@ -11,17 +11,39 @@ A delay and reverb guitar pedal for the [Electrosmith Daisy Seed](https://electr
 
 ![pedal image](docs/pedal.jpeg)
 
+## Controls
+
+### Knobs
+
 The factory knob layout (FS2 held: knob 4 sets the sound-on-sound length; the other knobs have no FS2 parameter):
 
 |Row|Left|Middle|Right|
 |---|---|---|---|
 |Top|Knob 1: delay mix|Knob 2: reverb mix|Knob 3: reverb space|
-|Bottom|Knob 4: delay time (FS2: SOS length)|Knob 5: delay feedback|Knob 6: delay color
-
-SW1 delay forward/off/reverse, SW2 delay type digital/tape/BBD, SW3 reverb Canyon/Hall/Plate, FS1 bypass (with spillover), FS2 tap: sound on sound on/off (LED2 blinks); hold and turn a knob: the knobs' FS2 parameters.
+|Bottom|Knob 4: delay time (FS2: SOS length)|Knob 5: delay feedback|Knob 6: delay color|
 
 These knobs can all be remapped in the editor, shown below:
+
 ![Knob assign screen](docs/knobs.png)
+
+### Switches
+
+Each toggle has three positions (up / middle / down):
+
+|Switch|Up|Middle|Down|
+|---|---|---|---|
+|SW1: delay direction|Forward|Off: no new input, repeats ring out|Reverse: every repeat plays backwards|
+|SW2: delay type|Digital: clean, knob 6 adds bitcrush|Tape: wow, flutter, saturation; knob 6 ages the tape|BBD: dark, clocked repeats; knob 6 degrades the samples|
+|SW3: reverb|Canyon: deep, modulated (after the Eventide H3000 Breathing Canyon)|Hall: large, smooth (after the Lexicon 480L Random Hall)|Plate: bright, dense (after the Lexicon 224XL Rich Plate)|
+
+### Footswitches and LEDs
+
+|Footswitch|Tap|Hold|Light|
+|---|---|---|---|
+|FS1|Bypass on/off; delay and reverb tails ring out after bypass|—|LED1 lit: effect on|
+|FS2|Sound on sound on/off|Turn a knob to set its FS2 parameter instead (factory: knob 4 sets the SOS length, 10–120 s)|LED2 blinks while sound on sound is on; otherwise it shows the input level|
+
+A tap that turned a knob or flipped a toggle while FS2 was down does not toggle sound on sound.
 
 ## Flashing Your Device
 For folks who don't want to bother with building their own firmware, you can grab one from Releases.
