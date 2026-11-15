@@ -413,7 +413,9 @@ private:
         }
         float y = l.Read(std::max(2.0f, nominal + t.off[t.active]));
         if (t.fade.on) {
-            y = t.fade.Mix(y, l.Read(std::max(2.0f, nominal + t.off[1 - t.active])));
+            // Not Crossfade::Mix: reading the line before the weight costs a callee-saved register here (+3.3 ‰ on
+            // the bench's Hall).
+            y += t.fade.Weight() * (l.Read(std::max(2.0f, nominal + t.off[1 - t.active])) - y);
             if (t.fade.Advance()) t.active ^= 1;
         }
         --t.count;
