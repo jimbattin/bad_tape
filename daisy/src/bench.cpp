@@ -1,10 +1,10 @@
 // The DSP benchmark (daisy/Makefile APP=bench, build/<BOARD>-bench/bad_tape_bench.bin). No audio: the board, USB and
 // SDRAM come up with the pedal's startup (firmware.h: FZ, the MPU), then every stage of the pedal's per-block work is
 // timed with the DWT cycle counter on kBlockSize blocks of uniform noise (+-0.5): 200 ms of warm-up blocks, then 2 s of
-// measured ones, interrupts masked inside each measured block (USB is serviced between blocks and between stages). The
-// memory placement matches the pedal's (DSP objects in DTCM, the delay line and the pool's slow region in SDRAM, the
-// fast region in D2, the timed block functions in ITCM like AudioCallback), plus a fast region in SDRAM for the pool
-// placement comparison.
+// measured ones (the launch stage after an untimed 3 s pre-roll), interrupts masked inside each measured block (USB is
+// serviced between blocks and between stages). The memory placement matches the pedal's (DSP objects in DTCM, the
+// delay line in its own SDRAM bank and the SOS line and the pool's slow region in SDRAM, the fast region in D2, the
+// timed block functions in ITCM like AudioCallback), plus a fast region in SDRAM for the pool placement comparison.
 // Log lines (usb_log.py; daisy/README.md "Performance"):
 //   at power-on and on HELLO "bad_tape_bench <board> sysclk N MHz <build id>";
 //   "bench pass N budget B cycles" (B: cycles in one block), then per stage

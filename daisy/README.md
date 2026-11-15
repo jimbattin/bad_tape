@@ -108,7 +108,7 @@ uv run daisy/tools/usb_log.py 60 --check-params             # SET/GET round trip
 
 ## Host tests
 
-`make host && build/host/tests` (or `make test`, which also fails when `docs/MIDI.md` is not what `make midi-doc` writes) from the repo root builds the host-portable headers in `daisy/src/` against GoogleTest (`pkg-config gtest_main`) and runs `tests/*.cpp`. `tests/test_util.h` holds the shared helpers: signals and levels, a zero-crossing frequency measure, an RT60 measure, the engine rigs (`EngineRig` with `Render`, `DelayRig`), the color scopes' loop probe (`SecondRepeatError`), the single-algorithm `ReverbRig` and the checks every reverb shares (bounded decay at every loop-parameter corner, L/R decorrelation). The suites:
+`make host && build/host/tests` (or `make test`, which also fails when `docs/MIDI.md` is not what `make midi-doc` writes) from the repo root builds the host-portable headers in `daisy/src/` against GoogleTest (`pkg-config gtest_main`) and runs `tests/*.cpp`. `tests/test_util.h` holds the shared helpers: signals and levels, a zero-crossing frequency measure, a normalised correlation (`Corr`, either signal optionally reversed), an RT60 measure, the engine rigs (`EngineRig` with `Render`, `DelayRig`), the color scopes' loop probe (`SecondRepeatError`), the single-algorithm `ReverbRig` and the checks every reverb shares (bounded decay at every loop-parameter corner, L/R decorrelation). The suites:
 - `tests/blocks_test.cpp`: the parameter smoother's time constant; the bit tests (`Flush`, `IsZero`, `IsPositive`, `Below`, `Above`, `SoftClip`, `Clamp`, `Min`, `Max`) giving the float compares' answers, bit for bit, on ±0, denormals, the thresholds and their neighbours, infinities and 40 000 values over the whole exponent range; `HalfRateReverb` passing 5 kHz at level (±1.2 %) and leaving a 40 kHz tone's 8 kHz alias 70 dB down.
 - `tests/controls_test.cpp`: the toggle position mapping and hysteresis, the FS2 debounce (press and release counts, bounce on either edge).
 - `tests/params_test.cpp`: the table's ranges, tapers and codes, every link law rising with its source and giving the target's default at the source's.
@@ -153,7 +153,7 @@ The bench and the latency image are further images from the same sources (`APP=b
 ```sh
 make -C daisy APP=bench -j
 daisy/tools/flash_when_ready.sh daisy/build/hothouse-bench/bad_tape_bench.bin
-uv run daisy/tools/usb_log.py 40         # one bench pass every ~31 s
+uv run daisy/tools/usb_log.py 40         # one bench pass every ~38 s
 make -C daisy APP=latency -j             # needs a cable from the left output to the left input
 daisy/tools/flash_when_ready.sh daisy/build/hothouse-latency/bad_tape_latency.bin
 uv run daisy/tools/usb_log.py 20         # one latency pass every ~17 s
@@ -168,19 +168,19 @@ The worst-case settings (`kWorst` in `src/bench.cpp`; the pedal runs set the sam
 
 ### Bench (per stage)
 
-`src/bench.cpp` (`APP=bench`) runs no audio. It brings up the board, USB and SDRAM with the pedal's startup (`btfw::Start`: FPSCR.FZ, the MPU) and the same memory placement (DSP objects in DTCM, the delay line and the pool's slow region in SDRAM, the fast region in D2, the timed block functions in ITCM like `AudioCallback`), then times each stage with the DWT cycle counter on `kBlockSize` blocks of uniform noise (±0.5, `XorShift32`, 64 blocks cycled): 200 ms of warm-up blocks, then 2 s of measured blocks, interrupts masked inside each measured block. Its log lines:
+`src/bench.cpp` (`APP=bench`) runs no audio. It brings up the board, USB and SDRAM with the pedal's startup (`btfw::Start`: FPSCR.FZ, the MPU) and the same memory placement (DSP objects in DTCM, the delay line in its own SDRAM bank and the SOS line and the pool's slow region in SDRAM, the fast region in D2, the timed block functions in ITCM like `AudioCallback`), then times each stage with the DWT cycle counter on `kBlockSize` blocks of uniform noise (±0.5, `XorShift32`, 64 blocks cycled): 200 ms of warm-up blocks, then 2 s of measured blocks (`engine eq sweep rev plate launch` after an untimed 3 s pre-roll), interrupts masked inside each measured block. Its log lines:
 - at power-on and on HELLO: `bad_tape_bench hothouse sysclk N MHz <build id>`;
-- per pass: `bench pass N budget B cycles`, one `bench NAME cycles avg A max M permille avg P.p max Q.q` per stage, then `bench pass N done`; passes repeat every ~31 s (2 s apart).
+- per pass: `bench pass N budget B cycles`, one `bench NAME cycles avg A max M permille avg P.p max Q.q` per stage, then `bench pass N done`; passes repeat every ~38 s (2 s apart).
 
 The stages:
 - `controls`: `hw.Process()`, the three toggle filters and the six knob reads (the callback's control work).
-- `delay fwd|rev bbd|tape|digital`: `btdsp::Delay` alone at 2000 ms and 110 % feedback, forward or reverse, each type at full color (digital with all four crush options on), its color in the loop (scope repeats), with sound on sound on in 501 at ratio 4 (in reverse with the SOS head's turnaround grain, 8 s back for 4 s, so the next grain's crossfade falls outside the 2 s run; the pedal rows include one); `delay fwd bbd|tape|digital all`: forward with every scope all, `Delay::ColorInput` timed too.
+- `delay fwd|rev bbd|tape|digital`: `btdsp::Delay` alone at 2000 ms and 110 % feedback, forward or reverse, each type at full color (digital with all four crush options on), its color in the loop (scope repeats), with sound on sound on in 501 at ratio 4 (in reverse with the SOS head's turnaround grain, 8 s back for 4 s, so the next grain's crossfade falls outside the 2 s run; `engine eq sweep rev plate launch` and the pedal rows include one); `delay fwd bbd|tape|digital all`: forward with every scope all, `Delay::ColorInput` timed too.
 - `plate|hall|canyon default|worst`: each reverb alone on a zeroed pool at `kReverbRate` (48 kHz, half a block's samples per block), at its table defaults or its `kWorst` settings; `worst sdram`: the same with the fast region in SDRAM (the placement comparison below). `resample`: `HalfRateReverb` around a reverb that costs nothing (the decimator and interpolator alone).
 - `eq worst`: `btdsp::Eq` alone at its `kWorst` settings (all five sections live); `eq sweep`: the same with every gain flipped between ±12 dB and every frequency between its range's ends every 20 ms, so every section redesigns its coefficients on every control tick.
 - `engine fwd|off|rev plate|hall|canyon`: `btdsp::Engine` (the whole chain) at `kWorst` for each SW1 × SW3 position.
 - Control paths, all at `kWorst`: `engine sw3 switch` (reverse, Hall → Plate at measured block 0: the fade-out, the ~15 ms pool clear and the fade-in all inside the run); `engine time sweep bbd|tape|digital` (forward, Hall, `delay_time` 10 ↔ 2000 ms every 20 ms, each type at full color: BBD and tape glide the head, digital crossfades two heads); `engine eq sweep rev plate` (reverse, Plate: the pedal's worst row, the EQ's five gains flipped between ±12 dB every 20 ms); `engine eq sweep rev plate launch` (the same after an untimed 3 s pre-roll from the flip, so the run holds the 20 ms where the main head's and the SOS head's grains launch together at 4 s, two grains of each crossfading: the pedal's worst moment). Maximum feedback (110 %) is in every engine stage.
 
-Measured 2026-11-15 (build 685880c with the bit tests, the delay line's own SDRAM bank and the SOS reverse grains wobbling again, before its commit) at 96 kHz, 32-sample blocks, with every color's scope at its default, all, and sound on sound on as in `kWorst` (2 passes; avg the median pass, max the highest), ‰ of the 160 000-cycle block:
+Measured 2026-11-15 (the tree committed as 0b588b9: the bit tests, the delay line's own SDRAM bank and the SOS reverse grains wobbling again) at 96 kHz, 32-sample blocks, with every color's scope at its default, all, and sound on sound on as in `kWorst` (2 passes; avg the median pass, max the highest), ‰ of the 160 000-cycle block:
 
 |Stage|avg ‰|max ‰|
 |---|---|---|
@@ -236,7 +236,7 @@ D2 wins for all three (SDRAM costs 21–33 % more), so the fast region stays in 
 
 ### Pedal (SW1 × SW3)
 
-`kWorst` (the EQ on, post, all five sections live; sound on sound on in 501 at ratio 4), `delay_mode` and `reverb_algo` set over SysEx, 12 s of log per row (`usb_log.py`), the first two status lines of each row dropped; measured 2026-11-15 (build 685880c with the bit tests, the bank placement and the wobbling SOS grains, before its commit) at 96 kHz with the input reading −16 to −23 dBFS (the cost does not depend on the signal) and every color's scope at its default, all (the BBD on the input). avg is the range of the remaining lines, max the highest. `underruns 0` on every row. The rev rows start at the flip, so they hold the SOS head's 4 s turnaround grain (8 s back) and the launches that follow it, with the main head's, at 4 s and 12 s (the rows' maxima: 700/701 ‰ Plate, 704 ‰ Hall, 592/594 ‰ Canyon; the main head's launches alone, every 2 s, 668–671/657–675/559–563 ‰); the off rows follow the fwd rows (SW1 off keeps the last direction: after rev the Plate costs as rev, 636–639 ‰ avg, 704 ‰ max).
+`kWorst` (the EQ on, post, all five sections live; sound on sound on in 501 at ratio 4), `delay_mode` and `reverb_algo` set over SysEx, 12 s of log per row (`usb_log.py`), the first two status lines of each row dropped; measured 2026-11-15 (the tree committed as 0b588b9) at 96 kHz with the input reading −16 to −23 dBFS (the cost does not depend on the signal) and every color's scope at its default, all (the BBD on the input). avg is the range of the remaining lines, max the highest. `underruns 0` on every row. The rev rows start at the flip, so they hold the SOS head's 4 s turnaround grain (8 s back) and the launches that follow it, with the main head's, at 4 s and 12 s (the rows' maxima: 700/701 ‰ Plate, 704 ‰ Hall, 592/594 ‰ Canyon; the main head's launches alone, every 2 s, 668–671/657–675/559–563 ‰); the off rows follow the fwd rows (SW1 off keeps the last direction: after rev the Plate costs as rev, 636–639 ‰ avg, 704 ‰ max).
 
 |SW1|SW3|avg ‰|max ‰|
 |---|---|---|---|
