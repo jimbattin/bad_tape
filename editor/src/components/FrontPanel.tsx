@@ -34,9 +34,9 @@ function EditorBadge({ title }: { title: string }) {
 }
 
 /**
- * The pedal's own controls (what you see is what you get): the three switches and FS1, the six knobs with the
- * parameters their slots drive (primary, and FS2 below), the CPU load. Editing one is a MIDI write: the pedal holds it
- * until the knob moves more than 3 % or the switch changes position.
+ * The pedal's own controls (what you see is what you get): the three switches, FS1 and FS2 (sound on sound), the six
+ * knobs with the parameters their slots drive (primary, and FS2 below), the CPU load. Editing one is a MIDI write: the
+ * pedal holds it until the knob moves more than 3 % or the switch changes position.
  */
 export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
   const algo = Math.round(shownValue(s, "reverb_algo", now) ?? 1);
@@ -100,6 +100,10 @@ export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
 
   const fs1 = shownParam(s, "bypass", now);
   const effectOn = fs1 !== undefined && enumIndex(fs1.info, fs1.code) === 0;
+  const fs2 = shownParam(s, "delay_sos", now);
+  const sosMode = shownParam(s, "delay_sos_mode", now);
+  const sosArmed = sosMode !== undefined && enumIndex(sosMode.info, sosMode.code) !== 0;
+  const sosOn = fs2 !== undefined && enumIndex(fs2.info, fs2.code) === 1;
 
   return (
     <aside class="pedal" aria-label="Pedal controls">
@@ -121,6 +125,21 @@ export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
             >
               <Lamp color={effectOn ? "green" : null} />
               {effectOn ? "Effect on" : "Bypassed"}
+            </button>
+          </div>
+          <div class="pedal-row">
+            <span>
+              <span class="pedal-id">FS2</span> Sound on sound
+            </span>
+            <button
+              type="button"
+              class="btn"
+              aria-pressed={sosOn}
+              disabled={!enabled || !fs2 || !sosArmed}
+              onClick={() => fs2 && onEdit(fs2.info.id, enumCode(fs2.info, sosOn ? 0 : 1))}
+            >
+              <Lamp color={sosOn && sosArmed ? "amber" : null} />
+              {sosOn ? "SOS on" : "SOS off"}
             </button>
           </div>
         </div>

@@ -11,7 +11,7 @@ A guitar pedal on the Electrosmith Daisy Seed in a Cleveland Music Co. HotHouse 
 |`tests/`|Host tests (GoogleTest) of everything in `daisy/src` that has no libDaisy dependency.|
 |`host/`|Host programs: `render.cpp` (the DSP chain offline on a WAV), `gen_midi_doc.cpp` (writes `docs/MIDI.md`).|
 |`tools/`|Python reverb measurements: `stimuli.py`, `features.py` (run with `uv`).|
-|`docs/`|`MIDI.md` (generated: never edit by hand), `EQ.md` (the EQ's specification).|
+|`docs/`|`MIDI.md` (generated: never edit by hand), `EQ.md` (the EQ's specification), `SOS.md` (sound on sound, a player's guide).|
 
 ## Build, test, flash
 
@@ -20,13 +20,15 @@ make test                          # host: build/host/tests + check docs/MIDI.md
 make midi-doc                      # regenerate docs/MIDI.md after any change to daisy/src/params.h
 git submodule update --init --recursive && make -C daisy/libDaisy   # once
 make -C daisy -j                   # firmware (Arm GNU Toolchain 13.3.rel1 on PATH): daisy/build/hothouse/bad_tape.bin
-daisy/tools/flash_when_ready.sh    # DFU flash; sends the running pedal the DFU SysEx first
-uv run daisy/tools/usb_log.py 30   # the pedal's log for 30 s
+BT_USB_PORT=3-3 daisy/tools/flash_when_ready.sh    # DFU flash; sends the running pedal the DFU SysEx first
+uv run daisy/tools/usb_log.py 30 --port 3-3        # the pedal's log for 30 s
 make -C daisy APP=bench -j         # benchmark image (APP=latency: latency image)
 make -C editor test check          # editor tests, tsc, Biome
 ```
 
 The firmware is `APP_TYPE = BOOT_SRAM`: it runs from SRAM, is flashed to QSPI at 0x90040000 and needs the Daisy bootloader (`make -C daisy program-boot`, once per Seed). Pedal hosts are build targets (`BOARD=hothouse`, the only one; others are added in `daisy/Makefile` and `daisy/src/board.h`).
+
+Two Seeds can be attached to this machine, both `0483:5740` "Daisy Seed Built In". Select by USB path: `--port BUS-PORT` for `usb_log.py`, `BT_USB_PORT` for `flash_when_ready.sh` (both refuse to guess with more than one attached). Bad Tape answers `uv run daisy/tools/usb_log.py 3 --identity --port <path>` with `device 62 board 1`; confirm before every flash. In the editor, use the port that reads `LINKED`.
 
 ## Hardware: HotHouse
 
@@ -34,22 +36,22 @@ Six knobs (two rows of three), three on/off/on toggles SW1–SW3, footswitches F
 
 ## Pedal controls (what you see is what you get)
 
-The knobs are remappable (factory layout below; editor Knobs tab, `knob_N_primary`/`knob_N_secondary`); the switches and FS1 are fixed.
+The knobs are remappable (factory layout below; editor Knobs tab, `knob_N_primary`/`knob_N_secondary`); the switches and footswitches are fixed.
 
 |Control|Function|
 |---|---|
 |Knob 1|Delay mix|
 |Knob 2|Reverb mix|
 |Knob 3|Reverb Space, a macro per algorithm (small and short → large and long). Hall: size, decay, spread, shape. Plate: size, mid and LF decay, depth. Canyon: master delay, feedback, master depth.|
-|Knob 4|Delay time, 10–2000 ms, audio taper (`32^n`, 15 % of the range at mid-travel: 309 ms at noon)|
+|Knob 4|Delay time, 10–2000 ms, audio taper (`32^n`, 15 % of the range at mid-travel: 309 ms at noon). FS2 held: `delay_sos_length` (10–120 s, log)|
 |Knob 5|Delay feedback, 0–110 %|
 |Knob 6|Delay color for the SW2 type, none fully CCW → full fully CW. BBD: sample degradation (still a BBD at 0). Tape: tape age. Digital: bitcrush, with four on/off options (`delay_crush_open`, `_clock`, `_wrap`, `_bits` + `delay_crush_mask`). Each type's scope (`delay_bbd_scope`, `delay_tape_scope`, `delay_crush_scope`; all, the default: the whole signal; repeats: the feedback loop only).|
 |SW1|Delay: up forward, middle off (no new input; repeats ring out), down reverse|
 |SW2|Delay type: up digital, middle tape, down BBD|
 |SW3|Reverb: up Canyon, middle Hall, down Plate|
 |FS1|Bypass (LED1 lit = effect on). Dry at unity; delay and reverb tails spill over.|
-|FS2|Shift: held, knob N drives its FS2 secondary `knob_N_secondary` (factory: none). Debounced 5 ms press / 30 ms release. No tap tempo or MIDI clock.|
-|LED2|Input meter on the raw left input: off ≤ −30 dBFS, full ≥ −10 dBFS, linear in dB, instant attack, 150 ms release|
+|FS2|Tap (released with no knob moved more than 3 % and no toggle changed): sound on sound on/off (`delay_sos`, when `delay_sos_mode` is not off). Held: knob N drives its FS2 secondary `knob_N_secondary` (factory: knob 4 drives `delay_sos_length`, the others none). Debounced 5 ms press / 30 ms release. No tap tempo or MIDI clock.|
+|LED2|Input meter on the raw left input: off ≤ −30 dBFS, full ≥ −10 dBFS, linear in dB, instant attack, 150 ms release. Blinks at 2 Hz while sound on sound is on.|
 
 A MIDI write holds a parameter on a knob slot until that knob moves more than 3 %. A knob turned under FS2 keeps its primary until it moves more than 3 % again with FS2 up. A toggle that changes position always wins. Details: `docs/MIDI.md` "Arbitration".
 
@@ -60,6 +62,8 @@ The formulas are in `daisy/README.md` "Signal flow" and the code is `daisy/src/d
 ## Delay
 
 `daisy/src/dsp/delay.h`, a 2^19-float line in SDRAM (5.46 s at 96 kHz). The types are `bbd.h` (compander, clocked sample-and-hold, filters, clock LFO), `tape.h` (wow/flutter, saturation, HF loss, LF bump, gated hiss, dropouts) and `crush.h` (bitcrush with open filters, a hold rate following the delay time, wrap, and bit inversion of an 8-bit word). Each type's scope (`delay_bbd_scope`, `delay_tape_scope`, `delay_crush_scope`) puts its color in one of two places. Repeats: inside the feedback loop, except the bit inversion and the tape's bump and hiss, which are on the wet output. All (the default): on the chain's input after a pre EQ (`Delay::ColorInput`, with its own tape, crush and BBD), so the dry, the repeats (once; the loop stays clean) and every reverb input are colored while bypass stays raw. Tape wow and flutter stay on the repeats' read head either way and also wobble the input in all (a short wow line); the BBD's clock LFO stays on the read head only. On a time change, tape and BBD glide the pitch and digital crossfades two heads. Reverse plays every repeat backwards (two crossfading grains), and the repeats stay reversed.
+
+Sound on sound (`delay_sos_mode`: off, 301, 501, overdub; `delay_sos` on FS2 and CC 26) is a second line in SDRAM (`kSosSamples`, 44 MiB, 120 s) that records what the loop writes, every sample, and one more head into the wet: 301 `delay_sos_length` back, once; 501 at `delay_sos_ratio` × the delay time, fed back into the loop; overdub `delay_sos_length` back, the line keeping `delay_sos_feedback` of it. Idle, `Delay::Process` is the delay's own plus one store; live, `ProcessSos` runs out of line with its ramps, gains and 501 glide on the control tick (`SosTick`). `docs/SOS.md` is the player's guide.
 
 ## Reverb
 
@@ -77,9 +81,9 @@ A five-band parametric. `docs/EQ.md` is the normative spec and `daisy/src/dsp/eq
 ## MIDI and the USB link
 
 - `daisy/src/params.h` is the single source of truth: ids, names, units, ranges, tapers, smoothing, switches, CCs, the knob-slot assignments and the Space links. Ids are fixed: append new parameters, never renumber. Ids are a `uint8_t` up to 254 (255 is `kNoParam`, a knob slot's none). Run `make midi-doc` after every change; `make test` fails while `docs/MIDI.md` is stale.
-- The USB MIDI device takes CC (the factory knob parameters, the switches and FS1), 14-bit NRPN (MSB = id >> 7, LSB = id & 0x7F) and SysEx for every parameter. SysEx frames are `F0 7D 62 02 <cmd> … F7` (manufacturer 0x7D non-commercial, device 0x62, link version 02: ids, counts and codes as two 7-bit bytes), specified in `daisy/src/link.h`. DFU is `F0 7D 62 02 06 F7`; `usb_log.py --dfu` also sends the version-01 frame `F0 7D 62 01 06 F7`, so it restarts older firmware. The Identity Reply carries board 1 (HotHouse) and the build id (short commit, `+dirty`). Frames for other devices and version-01 frames are ignored.
+- The USB MIDI device takes CC (the factory knob parameters, the switches, FS1 and FS2), 14-bit NRPN (MSB = id >> 7, LSB = id & 0x7F) and SysEx for every parameter. SysEx frames are `F0 7D 62 02 <cmd> … F7` (manufacturer 0x7D non-commercial, device 0x62, link version 02: ids, counts and codes as two 7-bit bytes), specified in `daisy/src/link.h`. DFU is `F0 7D 62 02 06 F7`; `usb_log.py --dfu` also sends the version-01 frame `F0 7D 62 01 06 F7`, so it restarts older firmware. The Identity Reply carries board 1 (HotHouse) and the build id (short commit, `+dirty`). Frames for other devices and version-01 frames are ignored.
 - The pedal sends only SysEx: a CC or NRPN write is applied and logged, never echoed (the Morningstar MC6 Pro takes incoming CCs on its channel as commands and rebooted on the echo). The editor learns of MIDI changes through WATCH.
-- Saved power-up values (editor SAVE) exist only for parameters not on a switch or FS1 (the knob layout included; a knob's primary replaces its saved value at power-up). They live in two QSPI slots (`saved_store.h`; a 256-id payload, the older 128-id payload still read). There are no presets.
+- Saved power-up values (editor SAVE) exist only for parameters not on a switch or footswitch (the knob layout included; a knob's primary replaces its saved value at power-up). They live in two QSPI slots (`saved_store.h`; a 256-id payload, the older 128-id payload still read). There are no presets.
 - The status log line reports the callback's CPU load (avg/max ‰) once a second. The bench image times every stage.
 
 ## Development rules
@@ -87,6 +91,6 @@ A five-band parametric. `docs/EQ.md` is the normative spec and `daisy/src/dsp/eq
 - C++17 (`gnu++17`), plain Make, `-O3`, no `-ffast-math`, FPSCR.FZ on. No heap anywhere in the firmware: check with `nm -u` on `daisy/build/hothouse/*.o`.
 - `daisy/src/dsp/`, `params.h`, `param_store.h`, `controls.h`, `midi.h`, `link.h` and `saved_store.h` must stay host-portable (no libDaisy), so `tests/` and `host/render` build them.
 - DSP output must not depend on block size. 96 kHz, 24-bit codec, 32-sample blocks (`btdsp::kSampleRate`, `btdsp::kBlockSize` in `dsp/blocks.h`); control ticks at 3 kHz (`kControlInterval` 32, the reverbs' `kReverbControlInterval` 16 at 48 kHz). Parameter changes must not click; `tests/dsp_invariants_test.cpp` checks every stage.
-- Memory placement (`daisy/src/memory.h`): `BT_ITCM` on every per-sample and per-tick function and `AudioCallback`, and every caller of a `BT_ITCM` function is itself `BT_ITCM` or cold. GCC drops `BT_ITCM` from template instantiations: hot templates are `[[gnu::always_inline]]`. Hot state goes in DTCM (`BT_DTCM`), the delay line and the reverb pool's slow region in SDRAM (`BT_SDRAM`), and the pool's fast region in D2 (`BT_D2`). NOLOAD regions are not zeroed at startup: their owner clears them.
+- Memory placement (`daisy/src/memory.h`): `BT_ITCM` on every per-sample and per-tick function and `AudioCallback`, and every caller of a `BT_ITCM` function is itself `BT_ITCM` or cold. GCC drops `BT_ITCM` from template instantiations: hot templates are `[[gnu::always_inline]]`. Hot state goes in DTCM (`BT_DTCM`), the delay and SOS lines and the reverb pool's slow region in SDRAM (`BT_SDRAM`), and the pool's fast region in D2 (`BT_D2`). NOLOAD regions are not zeroed at startup: their owner clears them.
 - Load budget: worst case (`kWorst` in `src/bench.cpp`, every EQ section live) under 850 ‰ of the block period on the pedal.
 - Keep these in step with the code: `daisy/README.md` (file map, controls, log lines, which are documented only there, and measured numbers), `docs/MIDI.md` (generated), `docs/EQ.md`, `editor/README.md`.

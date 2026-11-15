@@ -1,7 +1,7 @@
 // The saved power-up values: the editor's SAVE (link.h) persists a parameter's current value to QSPI flash, and the
 // pedal applies it at power-up instead of the params.h default (param_store.h Load). Only parameters not on a switch
-// or FS1 are saveable (those set their own value); no saved value means "use the factory default". A parameter on a
-// primary knob slot is saveable, but the knob replaces its saved value at power-up.
+// or footswitch are saveable (those set their own value); no saved value means "use the factory default". A parameter
+// on a primary knob slot is saveable, but the knob replaces its saved value at power-up.
 //
 // The store is a pair of 4 KB slots at QSPI 0x903FE000 / 0x903FF000 past the BOOT_SRAM image the Daisy bootloader
 // keeps at 0x90040000 (at most 512 KB), each holding a 16-byte header (magic, sequence number, payload length, CRC-32

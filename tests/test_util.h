@@ -123,13 +123,21 @@ inline double Frequency(const std::vector<float>& y, size_t from, size_t to, flo
     return n < 2 ? 0.0 : double(n - 1) * fs / double(last - first);
 }
 
-// The whole chain on zeroed memory, initialised at kFs.
+// The SOS line the rigs use by default: 2^15 samples (0.34 s), so the ~5 000 rigs of NoClickOnParamJump stay fast;
+// the SOS tests pass btdsp::kSosSamples.
+constexpr size_t kTestSosSamples = size_t(1) << 15;
+
+// The whole chain on zeroed memory, initialised at kFs, with an SOS line of sosSamples.
 struct EngineRig {
     std::vector<float> mem = std::vector<float>(btdsp::kDelaySamples);
+    std::vector<float> sos;
     std::vector<float> fast = std::vector<float>(btdsp::kReverbFastFloats);
     std::vector<float> slow = std::vector<float>(btdsp::kReverbSlowFloats);
     btdsp::Engine e;
-    EngineRig() { e.Init(kFs, mem.data(), btdsp::ReverbPool{fast.data(), slow.data()}); }
+    explicit EngineRig(size_t sosSamples = kTestSosSamples) : sos(sosSamples) {
+        e.Init(kFs, mem.data(), btdsp::SosLine{sos.data(), sos.size()},
+               btdsp::ReverbPool{fast.data(), slow.data()});
+    }
     void Set(uint8_t id, float v) { e.SetParam(id, v); }
     void Process(const float* in, float* out, size_t n) { e.Process(in, out, n); }
     // in[from, to) into out, in blocks of block.
@@ -150,7 +158,7 @@ constexpr float kAmp = 0.25f;
 // An engine with the delay at 100 % wet, no feedback, digital without color, forward; the tape and BBD colors in the
 // loop (scope repeats; the scope tests set all).
 struct DelayRig : EngineRig {
-    DelayRig() {
+    explicit DelayRig(size_t sosSamples = kTestSosSamples) : EngineRig(sosSamples) {
         Set(btparam::kReverbMix, 0.0f);  // the delay alone
         Set(btparam::kDelayMix, 100.0f);
         Set(btparam::kDelayFeedback, 0.0f);

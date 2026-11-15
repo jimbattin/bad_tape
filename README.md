@@ -4,20 +4,21 @@ A delay and reverb guitar pedal for the [Electrosmith Daisy Seed](https://electr
 
 - **EQ**, a five-band parametric (low shelf, three bells, high shelf; ±12 dB, 40 Hz–16 kHz), before the delay or after the reverb; off by default, MIDI and editor only (or a knob you assign to it).
 - **Delay**, forward or reverse, 10–2000 ms, in three types with a color knob: BBD (sample degradation), tape (tape age) or digital (bitcrush).
+- **Sound on sound** on every delay type: tap FS2 to hear what you played 10–120 s ago (301), add a far echo head (501), or loop and layer (overdub). See [docs/SOS.md](docs/SOS.md).
 - **Reverb**, three native algorithms: Hall (after the Lexicon 480L Random Hall), Plate (after the Lexicon 224XL Rich Plate) and Canyon (after the Eventide H3000 Breathing Canyon).
 - Every parameter is under USB MIDI control (CC, NRPN, SysEx), with a browser editor and saved power-up values. DFU is entered over USB MIDI, so flashing needs no button presses.
-- **Remappable knobs**: each knob drives any parameter not on a switch or FS1, and holding FS2 switches every knob to a second parameter of your choice. Set both layers on the editor's Knobs tab; they are saved with the power-up values.
+- **Remappable knobs**: each knob drives any parameter not on a switch or footswitch, and holding FS2 switches every knob to a second parameter of your choice. Set both layers on the editor's Knobs tab; they are saved with the power-up values.
 
 ![pedal image](docs/pedal.jpeg)
 
-The factory knob layout (no FS2 parameters):
+The factory knob layout (FS2 held: knob 4 sets the sound-on-sound length; the other knobs have no FS2 parameter):
 
 |Row|Left|Middle|Right|
 |---|---|---|---|
 |Top|Knob 1: delay mix|Knob 2: reverb mix|Knob 3: reverb space|
-|Bottom|Knob 4: delay time|Knob 5: delay feedback|Knob 6: delay color
+|Bottom|Knob 4: delay time (FS2: SOS length)|Knob 5: delay feedback|Knob 6: delay color
 
-SW1 delay forward/off/reverse, SW2 delay type digital/tape/BBD, SW3 reverb Canyon/Hall/Plate, FS1 bypass (with spillover), FS2 shift (hold for the knobs' FS2 parameters).
+SW1 delay forward/off/reverse, SW2 delay type digital/tape/BBD, SW3 reverb Canyon/Hall/Plate, FS1 bypass (with spillover), FS2 tap: sound on sound on/off (LED2 blinks); hold and turn a knob: the knobs' FS2 parameters.
 
 These knobs can all be remapped in the editor, shown below:
 ![Knob assign screen](docs/knobs.png)
@@ -53,6 +54,7 @@ make -C editor serve                # editor at http://localhost:3000/ (needs Bu
 
 ## Documentation
 
+- [`docs/SOS.md`](docs/SOS.md): sound on sound, a player's guide.
 - [`daisy/README.md`](daisy/README.md): firmware: controls, signal flow, USB MIDI link, log, performance, memory map.
 - [`docs/MIDI.md`](docs/MIDI.md): the MIDI implementation (generated from `daisy/src/params.h`).
 - [`docs/EQ.md`](docs/EQ.md): the EQ's specification.

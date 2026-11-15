@@ -16,8 +16,13 @@ disappears, so it keeps reading across resets and reflashes (the port
 re-enumerates each time) for as long as it is asked to run.
 
 Usage:
-    uv run daisy/tools/usb_log.py [SECONDS] [--dfu] [--identity]
+    uv run daisy/tools/usb_log.py [SECONDS] [--port BUS-PORT] [--dfu] [--identity]
         [--dump] [--get NAME]... [--set NAME=VALUE]... [--check-params]
+
+--port picks the Seed by its USB path (BUS-PORT, e.g. 3-3, as in
+/sys/bus/usb/devices and dfu-util's -p); it is required when more than one
+Seed (0483:5740) is attached, and the script exits 2 without it. The path is
+the physical port, so it survives resets and reflashes.
 
 SECONDS is how long to capture (default 30). Each output line is prefixed
 with the seconds since the device was last (re)connected. --dfu sends the
@@ -65,7 +70,7 @@ IDENTITY_REPLY_HEADER = bytes([0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x7D])
 REPLY_TIMEOUT = 1.0
 CODE_MAX = 16383
 TAPER_LOG, TAPER_ENUM, TAPER_AUDIO = 1, 2, 3
-CONTROL_NAMES = ('-', 'SW1', 'SW2', 'SW3', 'FS1')
+CONTROL_NAMES = ('-', 'SW1', 'SW2', 'SW3', 'FS1', 'FS2')
 
 
 def sysex_packets(msg: bytes) -> bytes:
@@ -223,6 +228,11 @@ class Session:
             emit(self.t0, f'-- identity device {msg[6]:02X} board {msg[8]} build {build}')
 
 
+def usb_path(d) -> str:
+    """The device's USB path, BUS-PORT[.PORT...]: /sys/bus/usb/devices and dfu-util -p use the same string."""
+    return f"{d.bus}-{'.'.join(str(p) for p in d.port_numbers)}"
+
+
 def in_endpoint(intf):
     return next(e for e in intf if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
 
@@ -378,6 +388,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description='Read the Bad Tape pedal USB log; read and set its parameters.')
     ap.add_argument('seconds', nargs='?', type=float, default=30.0, help='capture time / deadline (default 30)')
     ap.add_argument('--dfu', action='store_true', help='send the DFU SysEx: the pedal restarts into DFU')
+    ap.add_argument('--port', metavar='BUS-PORT',
+                    help='the USB path of the pedal (e.g. 3-3, as in /sys/bus/usb/devices); '
+                         'required when more than one Seed is attached')
     ap.add_argument('--identity', action='store_true', help='send the MIDI Identity Request and print the reply')
     ap.add_argument('--dump', action='store_true', help='print the parameter table with current values')
     ap.add_argument('--get', action='append', default=[], metavar='NAME', help='print a parameter (repeatable)')
@@ -393,7 +406,15 @@ def main() -> None:
         pending.append((DFU_PACKETS, 'dfu'))
     end = time.time() + args.seconds
     while time.time() < end:
-        d = usb.core.find(idVendor=0x0483, idProduct=0x5740)
+        seeds = list(usb.core.find(find_all=True, idVendor=0x0483, idProduct=0x5740))
+        if args.port:
+            d = next((s for s in seeds if usb_path(s) == args.port), None)
+        elif len(seeds) > 1:
+            print('-- usb: ' + str(len(seeds)) + ' Seeds attached (' + ', '.join(usb_path(s) for s in seeds)
+                  + '); pass --port', flush=True)
+            sys.exit(2)
+        else:
+            d = seeds[0] if seeds else None
         if d is None:
             time.sleep(0.2)
             continue

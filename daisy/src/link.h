@@ -18,9 +18,9 @@
 //   04 DUMP                           (no payload) the pedal answers one 14 PARAM per id, then 15 DUMP END. A DUMP
 //                                     during a dump restarts it.
 //   05 WATCH <on>                     on = 1: the pedal streams 13 VALUE for every parameter whose code changed for any
-//                                     reason (knob, switch, FS1, link, MIDI), checked every 20 ms (WatchDue: a few
-//                                     codes of knob jitter are absorbed). Turning it on records the current codes as
-//                                     sent. Off (0) is the boot default. A wrong length or on > 1 logs
+//                                     reason (knob, switch, FS1, FS2, link, MIDI), checked every 20 ms (WatchDue: a
+//                                     few codes of knob jitter are absorbed). Turning it on records the current codes
+//                                     as sent. Off (0) is the boot default. A wrong length or on > 1 logs
 //                                     `link: bad watch message`.
 //   07 SAVE <id hi> <id lo> ...       (1..the saveable count ids; a longer frame is dropped without a reply) saves
 //                                     each id's current value as its power-up value, in one flash write
@@ -29,8 +29,8 @@
 //                                     nothing changes there is no flash write and the status is 0.
 //   09 SAVED?                         (no payload) the pedal answers 16 SAVED for every saveable id in id order, then
 //                                     18 SAVED END.
-//   A SAVE/CLEAR with an empty or odd payload, an id >= the parameter count or a parameter on a switch or FS1 (not
-//   saveable) logs `link: bad save message CC` and answers 17 STORE 2.
+//   A SAVE/CLEAR with an empty or odd payload, an id >= the parameter count or a parameter on a switch or footswitch
+//   (not saveable) logs `link: bad save message CC` and answers 17 STORE 2.
 //   An id >= the parameter count or a wrong length logs `link: bad param message CC` and gets no reply.
 //   Any other command with this header logs `link: unknown command CC`. SysEx for other devices (e.g. a flasher
 //   broadcasting DFU frames for several devices) is ignored.

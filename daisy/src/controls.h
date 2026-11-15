@@ -16,6 +16,8 @@ enum class DelayType : uint8_t { kBbd = 0, kTape = 1, kDigital = 2 };
 // The routing parameter (MIDI only; no switch), what feeds the reverb: the delay's 100 % wet, the delay mix
 // (default), or the dry input (through the EQ when it is placed pre).
 enum class Routing : uint8_t { kWet = 0, kMix = 1, kDry = 2 };
+// delay_sos_mode (no switch): what the sound-on-sound head is (dsp/delay.h).
+enum class SosMode : uint8_t { kOff = 0, k301 = 1, k501 = 2, kOverdub = 3 };
 // SW3: Down Plate, Middle Hall, Up Canyon.
 enum class Algo : uint8_t { kPlate = 0, kHall = 1, kCanyon = 2 };
 
@@ -23,6 +25,7 @@ enum class Algo : uint8_t { kPlate = 0, kHall = 1, kCanyon = 2 };
 inline DelayMode ToDelayMode(uint8_t pos) { return pos <= 2 ? DelayMode(pos) : DelayMode::kOff; }
 inline DelayType ToDelayType(uint8_t pos) { return pos <= 2 ? DelayType(pos) : DelayType::kTape; }
 inline Routing ToRouting(uint8_t pos) { return pos <= 2 ? Routing(pos) : Routing::kMix; }
+inline SosMode ToSosMode(uint8_t v) { return v <= 3 ? SosMode(v) : SosMode::kOff; }
 inline Algo ToAlgo(uint8_t pos) { return pos <= 2 ? Algo(pos) : Algo::kHall; }
 
 // Log names.
@@ -33,6 +36,9 @@ inline const char* Name(DelayType t) {
     return t == DelayType::kBbd ? "bbd" : t == DelayType::kDigital ? "digital" : "tape";
 }
 inline const char* Name(Routing r) { return r == Routing::kWet ? "wet" : r == Routing::kDry ? "dry" : "mix"; }
+inline const char* Name(SosMode m) {
+    return m == SosMode::k301 ? "301" : m == SosMode::k501 ? "501" : m == SosMode::kOverdub ? "overdub" : "off";
+}
 inline const char* Name(Algo a) { return a == Algo::kPlate ? "plate" : a == Algo::kCanyon ? "canyon" : "hall"; }
 
 // A toggle accepts a new position only after it has read that position for kToggleStableBlocks consecutive blocks,

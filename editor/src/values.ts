@@ -37,7 +37,7 @@ export const enumIndex = (p: ParamInfo, code: number): number => Math.round(from
 /** An enum option index as its code. */
 export const enumCode = (p: ParamInfo, index: number): number => toCode(p, p.min + index);
 
-/** A parameter not on a switch or FS1: the editor can edit and save it. */
+/** A parameter not on a switch or footswitch: the editor can edit and save it. */
 export const isSaveable = (p: ParamInfo): boolean => p.control === 0;
 
 /** An enum's value names in value order (index = value − min), parsed from its unit "0 reverse, 1 off, …"; else null. */

@@ -51,7 +51,7 @@ TEST(Table, ControlsAndCcs) {
             ++uses[d.control];
         }
     }
-    for (Control c : {Control::kSw1, Control::kSw2, Control::kSw3, Control::kFs1})
+    for (Control c : {Control::kSw1, Control::kSw2, Control::kSw3, Control::kFs1, Control::kFs2})
         EXPECT_EQ(uses[c], 1) << "control " << int(c);
 }
 
@@ -137,8 +137,8 @@ TEST(Lookup, NameCcSlotToggle) {
 }
 
 TEST(Lookup, FactoryLayout) {
-    const uint8_t expected[kSlots] = {kDelayMix, kReverbMix, kHallSpace, kDelayTime, kDelayFeedback, kDelayColor,
-                                      kNoParam,  kNoParam,   kNoParam,   kNoParam,   kNoParam,       kNoParam};
+    const uint8_t expected[kSlots] = {kDelayMix, kReverbMix, kHallSpace, kDelayTime,      kDelayFeedback, kDelayColor,
+                                      kNoParam,  kNoParam,   kNoParam,   kDelaySosLength, kNoParam,       kNoParam};
     for (int s = 0; s < kSlots; ++s)
         EXPECT_EQ(ResolveSlot(kParams[SlotAssignId(s)].def, btctl::Algo::kHall), expected[s]) << "slot " << s;
 }

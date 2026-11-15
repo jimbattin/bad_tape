@@ -23,7 +23,7 @@ namespace btparam {
 
 // kAudio: an offset exponential like an A-taper pot, min + (max - min) * (32^n - 1) / 31; 15 % of the range at n = 0.5.
 enum class Taper : uint8_t { kLinear = 0, kLog = 1, kEnum = 2, kAudio = 3 };
-enum class Control : uint8_t { kNone = 0, kSw1 = 1, kSw2 = 2, kSw3 = 3, kFs1 = 4 };
+enum class Control : uint8_t { kNone = 0, kSw1 = 1, kSw2 = 2, kSw3 = 3, kFs1 = 4, kFs2 = 5 };
 enum class Group : uint8_t { kGlobal = 0, kDelay = 1, kHall = 2, kPlate = 3, kCanyon = 4, kEq = 5, kKnobs = 6 };
 
 struct ParamDef {
@@ -64,6 +64,7 @@ enum ParamId : uint8_t {
     kDelayCrushOpen, kDelayCrushClock, kDelayCrushWrap, kDelayCrushBits, kDelayCrushMask, kDelayCrushScope,
     kDelayTapeScope, kDelayBbdScope,
     kEqMidGain3, kEqMidFreq3, kEqMidQ3,
+    kDelaySosMode, kDelaySos, kDelaySosLength, kDelaySosRatio, kDelaySosFeedback, kDelaySosLevel,
     kParamCount
 };
 constexpr uint8_t kNoParam = 255;  // an assignment's "none"
@@ -72,7 +73,8 @@ static_assert(kParamCount <= kNoParam, "kNoParam is never a parameter id, and ui
 // The table's short names (taper, control, group); detail only.
 namespace detail {
 constexpr Taper L = Taper::kLinear, G = Taper::kLog, E = Taper::kEnum, A = Taper::kAudio;
-constexpr Control N_ = Control::kNone, S1 = Control::kSw1, S2 = Control::kSw2, S3 = Control::kSw3, F1 = Control::kFs1;
+constexpr Control N_ = Control::kNone, S1 = Control::kSw1, S2 = Control::kSw2, S3 = Control::kSw3, F1 = Control::kFs1,
+                  F2 = Control::kFs2;
 constexpr Group Gl = Group::kGlobal, De = Group::kDelay, Ha = Group::kHall, Pl = Group::kPlate, Ca = Group::kCanyon,
                 Eq = Group::kEq, Kn = Group::kKnobs;
 
@@ -218,7 +220,8 @@ inline constexpr ParamDef kParams[] = {
 
     // The knob slots (param_store.h): what knob N drives without FS2 (primary) and with FS2 held (secondary). An
     // assignment holds a parameter id; kNoParam (255) or any id that is not assignable (IsAssignable) means none, and
-    // any of the three *_space ids means the active algorithm's Space.
+    // any of the three *_space ids means the active algorithm's Space. Factory secondaries: knob 4 (delay time) drives
+    // the sound-on-sound length with FS2 held; the others none.
     {kKnob1Primary,         "knob_1_primary",         "param id (255 = none)", 0, kNoParam, kDelayMix,      E, 0, N_, 0, Kn},
     {kKnob2Primary,         "knob_2_primary",         "param id (255 = none)", 0, kNoParam, kReverbMix,     E, 0, N_, 0, Kn},
     {kKnob3Primary,         "knob_3_primary",         "param id (255 = none)", 0, kNoParam, kHallSpace,     E, 0, N_, 0, Kn},
@@ -228,7 +231,7 @@ inline constexpr ParamDef kParams[] = {
     {kKnob1Secondary,       "knob_1_secondary",       "param id (255 = none)", 0, kNoParam, kNoParam,       E, 0, N_, 0, Kn},
     {kKnob2Secondary,       "knob_2_secondary",       "param id (255 = none)", 0, kNoParam, kNoParam,       E, 0, N_, 0, Kn},
     {kKnob3Secondary,       "knob_3_secondary",       "param id (255 = none)", 0, kNoParam, kNoParam,       E, 0, N_, 0, Kn},
-    {kKnob4Secondary,       "knob_4_secondary",       "param id (255 = none)", 0, kNoParam, kNoParam,       E, 0, N_, 0, Kn},
+    {kKnob4Secondary,       "knob_4_secondary",       "param id (255 = none)", 0, kNoParam, kDelaySosLength, E, 0, N_, 0, Kn},
     {kKnob5Secondary,       "knob_5_secondary",       "param id (255 = none)", 0, kNoParam, kNoParam,       E, 0, N_, 0, Kn},
     {kKnob6Secondary,       "knob_6_secondary",       "param id (255 = none)", 0, kNoParam, kNoParam,       E, 0, N_, 0, Kn},
 
@@ -259,6 +262,18 @@ inline constexpr ParamDef kParams[] = {
     {kEqMidGain3,           "eq_mid_gain_3",          "dB",            -12,  12,    0,      L, 20, N_, 0,  Eq},
     {kEqMidFreq3,           "eq_mid_freq_3",          "Hz",            800,  12000, 3000,   G, 20, N_, 0,  Eq},
     {kEqMidQ3,              "eq_mid_q_3",             "Q",             0.4f, 8,     1,      G, 20, N_, 0,  Eq},
+
+    // Sound on sound (dsp/delay.h): a second, long line beside the delay's, read by one more head into the delay's
+    // wet. delay_sos_mode picks what that head is (btctl::SosMode); delay_sos switches it on and off (FS2 tap, CC 26).
+    // 301: a head delay_sos_length back, played once. 501: a head at delay_sos_ratio x the delay time, fed back into
+    // the delay loop at the delay feedback. overdub: the line keeps delay_sos_feedback of what it played
+    // delay_sos_length ago under the new input. delay_sos_level is the head's output level.
+    {kDelaySosMode,         "delay_sos_mode",         "0 off, 1 301, 2 501, 3 overdub", 0, 3, 0, E, 0, N_, 0, De},
+    {kDelaySos,             "delay_sos",              "0 off, 1 on",   0,    1,     0,      E, 0,  F2, 26, De},
+    {kDelaySosLength,       "delay_sos_length",       "s",             10,   120,   15,     G, 0,  N_, 0,  De},
+    {kDelaySosRatio,        "delay_sos_ratio",        "x delay time",  1.25f, 4,    2.5f,   L, 0,  N_, 0,  De},
+    {kDelaySosFeedback,     "delay_sos_feedback",     "%",             0,    100,   90,     L, 20, N_, 0,  De},
+    {kDelaySosLevel,        "delay_sos_level",        "%",             0,    100,   100,    L, 20, N_, 0,  De},
 };
 // clang-format on
 }  // namespace detail
@@ -336,7 +351,7 @@ inline bool IsSpace(uint8_t id) { return id == kHallSpace || id == kPlateSpace |
 inline uint8_t SpaceParam(btctl::Algo a) {
     return a == btctl::Algo::kPlate ? kPlateSpace : a == btctl::Algo::kCanyon ? kCanyonSpace : kHallSpace;
 }
-// Not on a switch or FS1: the parameter has a saved power-up value (saved_store.h).
+// Not on a switch or footswitch: the parameter has a saved power-up value (saved_store.h).
 constexpr bool IsSaveable(uint8_t id) { return id < kParamCount && kParams[id].control == Control::kNone; }
 // The number of saveable parameters (SAVED END's count; the longest SAVE).
 constexpr int kSaveableCount = [] {

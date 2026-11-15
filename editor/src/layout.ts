@@ -54,6 +54,16 @@ export const TABS: TabDef[] = [
       },
       { title: "Reverb", rows: [row("reverb_mix", "Mix"), row("routing", "Input")] },
       {
+        title: "Sound on sound",
+        rows: [
+          row("delay_sos_mode", "Mode"),
+          row("delay_sos_length", "Length"),
+          row("delay_sos_ratio", "501 head"),
+          row("delay_sos_feedback", "Overdub keep"),
+          row("delay_sos_level", "Level"),
+        ],
+      },
+      {
         title: "Bucket brigade",
         activeWhen: { name: "delay_type", value: 0 },
         rows: [
