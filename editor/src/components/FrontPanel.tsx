@@ -1,6 +1,6 @@
 import { assignLabel, isSpace, KNOBS, type Slots } from "../knobs";
 import type { ParamInfo } from "../protocol";
-import { isOverridden, type State, shownCode, shownParam, shownValue } from "../state";
+import { isOverridden, type State, shownAlgo, shownCode, shownParam, shownValue } from "../state";
 import { codeToNorm, enumCode, enumIndex, formatCode, normToCode } from "../values";
 import { CpuMeter } from "./CpuMeter";
 import { GroupBox } from "./GroupBox";
@@ -39,7 +39,7 @@ function EditorBadge({ title }: { title: string }) {
  * pedal holds it until the knob moves more than 3 % or the switch changes position.
  */
 export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
-  const algo = Math.round(shownValue(s, "reverb_algo", now) ?? 1);
+  const algo = shownAlgo(s, now) ?? 1;
   const delayType = Math.round(shownValue(s, "delay_type", now) ?? 1);
   const nameOf = (p: ParamInfo): string =>
     isSpace(p.name)
@@ -72,8 +72,8 @@ export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
     const code = p && shownCode(s, p.id, now);
     const label = p ? nameOf(p) : "None";
     const text = p && code !== undefined ? formatCode(p, code) : "—";
-    const fs2 = slots[k - 1 + KNOBS];
-    const fs2Code = fs2 && shownCode(s, fs2.id, now);
+    const fs2Slot = slots[k - 1 + KNOBS];
+    const fs2SlotCode = fs2Slot && shownCode(s, fs2Slot.id, now);
     return (
       <div key={k}>
         <div class="pedal-knob-head">
@@ -92,7 +92,9 @@ export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
           onReset={() => p && onEdit(p.id, p.defCode)}
         />
         <div class="pedal-knob-fs2">
-          {fs2 ? `FS2 ${nameOf(fs2)} ${fs2Code !== undefined ? formatCode(fs2, fs2Code) : "—"}` : "FS2 None"}
+          {fs2Slot
+            ? `FS2 ${nameOf(fs2Slot)} ${fs2SlotCode !== undefined ? formatCode(fs2Slot, fs2SlotCode) : "—"}`
+            : "FS2 None"}
         </div>
       </div>
     );
@@ -100,10 +102,10 @@ export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
 
   const fs1 = shownParam(s, "bypass", now);
   const effectOn = fs1 !== undefined && enumIndex(fs1.info, fs1.code) === 0;
-  const fs2 = shownParam(s, "delay_sos", now);
+  const sos = shownParam(s, "delay_sos", now);
   const sosMode = shownParam(s, "delay_sos_mode", now);
   const sosArmed = sosMode !== undefined && enumIndex(sosMode.info, sosMode.code) !== 0;
-  const sosOn = fs2 !== undefined && enumIndex(fs2.info, fs2.code) === 1;
+  const sosOn = sos !== undefined && enumIndex(sos.info, sos.code) === 1;
 
   return (
     <aside class="pedal" aria-label="Pedal controls">
@@ -135,8 +137,8 @@ export function FrontPanel({ s, now, slots, enabled, onEdit }: Props) {
               type="button"
               class="btn"
               aria-pressed={sosOn}
-              disabled={!enabled || !fs2 || !sosArmed}
-              onClick={() => fs2 && onEdit(fs2.info.id, enumCode(fs2.info, sosOn ? 0 : 1))}
+              disabled={!enabled || !sos || !sosArmed}
+              onClick={() => sos && onEdit(sos.info.id, enumCode(sos.info, sosOn ? 0 : 1))}
             >
               <Lamp color={sosOn && sosArmed ? "amber" : null} />
               {sosOn ? "SOS on" : "SOS off"}

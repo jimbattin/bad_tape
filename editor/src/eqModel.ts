@@ -7,7 +7,7 @@ export type BandId = "low" | "mid1" | "mid2" | "mid3" | "high";
 export type Kind = "lowShelf" | "bell" | "highShelf";
 
 /** The firmware's audio rate (Hz). */
-export const FS = 96000;
+const FS = 96000;
 /** Every gain's range, +-dB. */
 export const GAIN_MAX = 12;
 /** The bells' Q range. */

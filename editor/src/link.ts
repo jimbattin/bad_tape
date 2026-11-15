@@ -159,20 +159,26 @@ export class PedalLink {
 
   /** Sends at once, replacing any throttled send still waiting for the key (a recall must not be overwritten). */
   sendNow(key: string, bytes: number[]): void {
-    const p = this.pending.get(key);
-    if (p) clearTimeout(p.timer);
-    this.pending.delete(key);
+    this.cancelPending(key);
     this.lastSent.set(key, performance.now());
     this.send(bytes);
   }
 
   /**
    * Queues messages for a burst (a recall of many parameters): PACE_COUNT per PACE_MS, as the pedal's USB receive
-   * ring (512 bytes) holds about 51 SETs.
+   * ring (512 bytes) holds about 51 SETs. Cancels each key's pending throttled send, like sendNow.
    */
-  sendPaced(msgs: number[][]): void {
-    this.paced.push(...msgs);
+  sendPaced(msgs: { key: string; bytes: number[] }[]): void {
+    for (const m of msgs) this.cancelPending(m.key);
+    this.paced.push(...msgs.map((m) => m.bytes));
     if (this.pacedTimer === undefined) this.drainPaced();
+  }
+
+  /** Drops the throttled send still waiting for key, if any. */
+  private cancelPending(key: string): void {
+    const p = this.pending.get(key);
+    if (p) clearTimeout(p.timer);
+    this.pending.delete(key);
   }
 
   private drainPaced(): void {

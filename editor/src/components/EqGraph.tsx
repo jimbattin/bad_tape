@@ -1,5 +1,15 @@
 import { useMemo, useRef, useState } from "preact/hooks";
-import { BANDS, type BandDef, type EqSettings, eqCurves, eqTotalDb, GAIN_MAX, Q_MAX, Q_MIN } from "../eqModel";
+import {
+  BANDS,
+  type BandDef,
+  type BandId,
+  type EqSettings,
+  eqCurves,
+  eqTotalDb,
+  GAIN_MAX,
+  Q_MAX,
+  Q_MIN,
+} from "../eqModel";
 import { GroupBox } from "./GroupBox";
 
 interface Props {
@@ -38,8 +48,9 @@ const DB_LINES = [-24, -18, -12, -6, 0, 6, 12, 18, 24];
 const DB_LABELS = new Set([-24, -12, 0, 12, 24]);
 /** 1/24 octave from 20 Hz to 20 kHz. */
 const FREQS = Array.from({ length: 241 }, (_, i) => F_MIN * (F_MAX / F_MIN) ** (i / 240));
-/** A wheel notch or PageUp/PageDown: Q by a sixth of an octave's ratio. */
-const Q_STEP = 2 ** (1 / 6);
+/** A sixth of an octave as a ratio: a frequency arrow step, and a Q wheel notch or PageUp/PageDown. */
+const SIXTH_OCTAVE = 2 ** (1 / 6);
+const OCTAVE_24TH = 2 ** (1 / 24); // a fine (Shift) frequency step
 
 const xOf = (f: number) => X0 + ((X1 - X0) * Math.log(f / F_MIN)) / Math.log(F_MAX / F_MIN);
 const fOf = (x: number) => F_MIN * (F_MAX / F_MIN) ** ((x - X0) / (X1 - X0));
@@ -52,6 +63,23 @@ const clampDb = (db: number) => Math.max(-DB_CLAMP, Math.min(DB_CLAMP, db));
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const path = (dbs: number[]) =>
   dbs.map((db, i) => `${i === 0 ? "M" : "L"}${xOf(FREQS[i]!).toFixed(1)},${yOf(clampDb(db)).toFixed(1)}`).join("");
+
+interface Plot {
+  total: string;
+  fill: string;
+  bands: Record<BandId, string>;
+}
+/** The response curves as SVG paths: the whole EQ, its fill to 0 dB, each band alone. */
+function plotPaths(s: EqSettings): Plot {
+  const c = eqCurves(s, FREQS);
+  const total = path(c.total);
+  const zeroY = yOf(0);
+  return {
+    total,
+    fill: `M${X0},${zeroY}${total.replace("M", "L")}L${X1},${zeroY}Z`,
+    bands: Object.fromEntries(BANDS.map((b) => [b.id, path(c[b.id])])) as Record<BandId, string>,
+  };
+}
 
 /** A change to one band; omitted values stay. */
 interface BandChange {
@@ -66,7 +94,10 @@ export function EqGraph({ settings, enabled, onSet }: Props) {
   /** The band being dragged and the pointer's offset from its handle's centre at the grab (viewBox units). */
   const drag = useRef<{ band: BandDef; dx: number; dy: number } | null>(null);
   const [hoverHz, setHoverHz] = useState<number | null>(null);
-  const curves = useMemo(() => (settings ? eqCurves(settings, FREQS) : null), [settings]);
+  // Keyed on the settings' values: App reads a fresh EqSettings object every render.
+  const settingsKey = settings && JSON.stringify(settings);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: settingsKey stands for settings
+  const plot = useMemo(() => (settings ? plotPaths(settings) : null), [settingsKey]);
 
   const toPlot = (e: PointerEvent): { x: number; y: number } | null => {
     const svg = svgRef.current;
@@ -108,21 +139,19 @@ export function EqGraph({ settings, enabled, onSet }: Props) {
   const onKey = (e: KeyboardEvent, s: EqSettings, b: BandDef) => {
     const cur = s.bands[b.id];
     const gainStep = e.shiftKey ? 0.1 : 0.5;
-    const freqStep = 2 ** (e.shiftKey ? 1 / 24 : 1 / 6);
+    const freqStep = e.shiftKey ? OCTAVE_24TH : SIXTH_OCTAVE;
     if (e.key === "ArrowLeft") setBand(s, b, { freq: cur.freq / freqStep });
     else if (e.key === "ArrowRight") setBand(s, b, { freq: cur.freq * freqStep });
     else if (e.key === "ArrowUp") setBand(s, b, { gain: cur.gain + gainStep });
     else if (e.key === "ArrowDown") setBand(s, b, { gain: cur.gain - gainStep });
-    else if (e.key === "PageUp" && b.q !== null) setBand(s, b, { q: cur.q * Q_STEP });
-    else if (e.key === "PageDown" && b.q !== null) setBand(s, b, { q: cur.q / Q_STEP });
+    else if (e.key === "PageUp" && b.q !== null) setBand(s, b, { q: cur.q * SIXTH_OCTAVE });
+    else if (e.key === "PageDown" && b.q !== null) setBand(s, b, { q: cur.q / SIXTH_OCTAVE });
     else if (e.key === "Home") setBand(s, b, { gain: 0 });
     else return;
     e.preventDefault();
   };
 
   const badge = !settings ? "—" : !settings.enable ? "OFF" : settings.post ? "POST" : "PRE";
-  const zeroY = yOf(0);
-  const totalPath = curves ? path(curves.total) : "";
   const endDrag = () => {
     drag.current = null;
   };
@@ -174,13 +203,13 @@ export function EqGraph({ settings, enabled, onSet }: Props) {
             —
           </text>
         )}
-        {settings && curves && (
+        {settings && plot && (
           <g clip-path="url(#eq-plot)">
             {shownBands.map((b) => (
-              <path key={b.id} class="eq-curve-band" data-band={b.id} d={path(curves[b.id])} />
+              <path key={b.id} class="eq-curve-band" data-band={b.id} d={plot.bands[b.id]} />
             ))}
-            <path class="eq-fill-total" d={`M${X0},${zeroY}${totalPath.replace("M", "L")}L${X1},${zeroY}Z`} />
-            <path class="eq-curve-total" data-off={!settings.enable} d={totalPath} />
+            <path class="eq-fill-total" d={plot.fill} />
+            <path class="eq-curve-total" data-off={!settings.enable} d={plot.total} />
           </g>
         )}
         {settings && !settings.enable && (
@@ -222,7 +251,7 @@ export function EqGraph({ settings, enabled, onSet }: Props) {
                   onWheel: (e: WheelEvent) => {
                     if (band.q === null || e.deltaY === 0) return;
                     e.preventDefault();
-                    setBand(settings, band, { q: e.deltaY < 0 ? q * Q_STEP : q / Q_STEP });
+                    setBand(settings, band, { q: e.deltaY < 0 ? q * SIXTH_OCTAVE : q / SIXTH_OCTAVE });
                   },
                   onDblClick: () => setBand(settings, band, { gain: 0 }),
                   onKeyDown: (e: KeyboardEvent) => onKey(e, settings, band),

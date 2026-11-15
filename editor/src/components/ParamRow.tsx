@@ -13,7 +13,7 @@ interface Props {
   /** The Space macro that writes this parameter, if any. */
   link?: string;
   /** Replaces the slider or choice buttons. */
-  control?: ComponentChildren;
+  widget?: ComponentChildren;
   /** Replaces formatCode for the current, factory and saved values. */
   format?: (code: number) => string;
   /** An 8-bit mask: one toggle per bit (BitMask), values shown as bits. */
@@ -47,6 +47,7 @@ export function ParamRow(p: Props) {
   const edited = code !== undefined && code !== p.powerUp;
   const text = p.format ?? (p.mask ? (c: number) => maskText(enumIndex(info, c)) : (c: number) => formatCode(info, c));
   const labels = enumLabels(info);
+  const index = code === undefined ? -1 : enumIndex(info, code);
   const readout = code === undefined ? "—" : text(code);
   const factory = text(info.defCode);
   const savedText = saved?.has ? text(saved.code) : "—";
@@ -69,19 +70,14 @@ export function ParamRow(p: Props) {
         )}
       </span>
       <span class="row-control">
-        {p.control ??
+        {p.widget ??
           (p.mask ? (
-            <BitMask
-              label={p.label}
-              value={code === undefined ? -1 : enumIndex(info, code)}
-              disabled={off}
-              onChange={(m) => p.onEdit(enumCode(info, m))}
-            />
+            <BitMask label={p.label} value={index} disabled={off} onChange={(m) => p.onEdit(enumCode(info, m))} />
           ) : labels ? (
             <Segmented
               label={p.label}
               options={labels.map(capitalise)}
-              value={code === undefined ? -1 : enumIndex(info, code)}
+              value={index}
               disabled={off}
               onSelect={(i) => p.onEdit(enumCode(info, i))}
             />

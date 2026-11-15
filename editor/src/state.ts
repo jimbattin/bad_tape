@@ -177,3 +177,9 @@ export function shownValue(s: State, name: string, now: number): number | undefi
   const p = shownParam(s, name, now);
   return p && fromCode(p.info, p.code);
 }
+
+/** The reverb algorithm shown (reverb_algo: 0 plate, 1 hall, 2 canyon); undefined until the DUMP delivers it. */
+export function shownAlgo(s: State, now: number): number | undefined {
+  const v = shownValue(s, "reverb_algo", now);
+  return v === undefined ? undefined : Math.round(v);
+}

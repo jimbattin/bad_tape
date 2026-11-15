@@ -46,7 +46,8 @@ export function enumLabels(p: ParamInfo): string[] | null {
   return p.unit.split(",").map((s) => s.trim().replace(/^-?\d+\s+/, ""));
 }
 
-function number(v: number): string {
+/** v to 2, 1 or 0 decimals by magnitude. */
+function fmtNumber(v: number): string {
   const a = Math.abs(v);
   return v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : 2);
 }
@@ -61,8 +62,8 @@ export function formatValue(p: ParamInfo, v: number): string {
     const tenths = Math.round(v * 10) / 10; // a code's float noise around 0 prints as 0.0, never +0.0 or -0.0
     return `${tenths > 0 ? "+" : ""}${(tenths === 0 ? 0 : tenths).toFixed(1)} ${p.unit.split(" ")[0]}`;
   }
-  if (p.unit === "Hz" && v >= 1000) return `${number(v / 1000)} kHz`;
-  const text = p.unit === "%" || p.unit === "ms" ? v.toFixed(Math.abs(v) >= 10 ? 0 : 1) : number(v);
+  if (p.unit === "Hz" && v >= 1000) return `${fmtNumber(v / 1000)} kHz`;
+  const text = p.unit === "%" || p.unit === "ms" ? v.toFixed(Math.abs(v) >= 10 ? 0 : 1) : fmtNumber(v);
   return p.unit ? `${text} ${p.unit}` : text;
 }
 
