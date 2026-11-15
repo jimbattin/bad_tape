@@ -219,7 +219,7 @@ Ids are fixed (new parameters are appended). Smoothing is the one-pole time cons
 |128|`eq_mid_gain_3`|dB|-12|12|0|linear|||20|eq|
 |129|`eq_mid_freq_3`|Hz|800|12000|3000|log|||20|eq|
 |130|`eq_mid_q_3`|Q|0.4|8|1|log|||20|eq|
-|131|`delay_sos_mode`|0 off, 1 301, 2 501, 3 overdub|0|3|0|enum|||0|delay|
+|131|`delay_sos_mode`|0 off, 1 301, 2 501, 3 overdub|0|3|1|enum|||0|delay|
 |132|`delay_sos`|0 off, 1 on|0|1|0|enum|FS2|26|0|delay|
 |133|`delay_sos_length`|s|10|120|15|log|||0|delay|
 |134|`delay_sos_ratio`|x delay time|1.25|4|2.5|linear|||0|delay|

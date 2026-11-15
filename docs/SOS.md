@@ -7,7 +7,7 @@ A *head* is a point that plays back what was recorded a set time ago. A *loop* i
 ## Quick start
 
 1. Connect the pedal and open the editor.
-2. On the Delay tab, find "Sound on sound" and pick a Mode: Off, 301, 501 or Overdub (its button reads "Ov…").
+2. On the Delay tab, find "Sound on sound" and pick a Mode: Off, 301 (the factory setting), 501 or Overdub (its button reads "Ov…"). With 301 you can skip this step.
 
    ![Sound on sound section](sos-section.png)
 

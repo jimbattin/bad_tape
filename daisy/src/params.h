@@ -268,7 +268,7 @@ inline constexpr ParamDef kParams[] = {
     // 301: a head delay_sos_length back, played once. 501: a head at delay_sos_ratio x the delay time, fed back into
     // the delay loop at the delay feedback. overdub: the line keeps delay_sos_feedback of what it played
     // delay_sos_length ago under the new input. delay_sos_level is the head's output level.
-    {kDelaySosMode,         "delay_sos_mode",         "0 off, 1 301, 2 501, 3 overdub", 0, 3, 0, E, 0, N_, 0, De},
+    {kDelaySosMode,         "delay_sos_mode",         "0 off, 1 301, 2 501, 3 overdub", 0, 3, 1, E, 0, N_, 0, De},
     {kDelaySos,             "delay_sos",              "0 off, 1 on",   0,    1,     0,      E, 0,  F2, 26, De},
     {kDelaySosLength,       "delay_sos_length",       "s",             10,   120,   15,     G, 0,  N_, 0,  De},
     {kDelaySosRatio,        "delay_sos_ratio",        "x delay time",  1.25f, 4,    2.5f,   L, 0,  N_, 0,  De},
