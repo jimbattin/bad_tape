@@ -1,14 +1,16 @@
 // The DSP building blocks the delay, the reverbs and the EQ share: constants, the glide laws, coefficient helpers,
-// flush to zero, dB to gain, a soft clipper, a state-variable filter and the 4-pole Butterworth built on it, a one-pole
-// lowpass, parameter smoothers and ramps, a smoothstep crossfade, a noise gate, a random source, a quadrature
-// oscillator, and the reverbs' fractional delay line, Schroeder allpass and rate-limited glide. No libDaisy, no
-// allocation. BT_ITCM (../memory.h) puts the per-sample and per-tick functions in ITCM on the Seed.
+// exact float tests on the bits (no float compare per sample), flush to zero, dB to gain, a soft clipper, a
+// state-variable filter and the 4-pole Butterworth built on it, a one-pole lowpass, parameter smoothers and ramps, a
+// smoothstep crossfade, a noise gate, a random source, a quadrature oscillator, and the reverbs' fractional delay line,
+// Schroeder allpass and rate-limited glide. No libDaisy, no allocation. BT_ITCM (../memory.h) puts the per-sample and
+// per-tick functions in ITCM on the Seed.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "../memory.h"
 
@@ -51,18 +53,43 @@ inline float TimeCoef(float seconds, float rateHz) { return 1.0f - std::exp(-1.0
 // 0 -> 0, 1 -> 1, zero slope at both ends.
 BT_ITCM inline float SmoothStep(float x) { return x * x * (3.0f - 2.0f * x); }
 
+// Float tests on the bits, as integer compares: a float compare on the Seed is vcmp then vmrs, which stalls the
+// pipeline on every call. Each is exact for every non-NaN argument.
+BT_ITCM inline std::int32_t Bits(float x) {
+    std::int32_t b;
+    std::memcpy(&b, &x, sizeof b);
+    return b;
+}
+// a and b have the same bit pattern: equal (never +0 against -0), or the same NaN.
+BT_ITCM inline bool SameBits(float a, float b) { return Bits(a) == Bits(b); }
+// x == 0 (+0 or -0).
+BT_ITCM inline bool IsZero(float x) { return (std::uint32_t(Bits(x)) << 1) == 0u; }
+// x > 0: positive floats are the positive integers; +0, -0 and negative floats are not.
+BT_ITCM inline bool IsPositive(float x) { return Bits(x) > 0; }
+// x < c and x > c for c > 0: below c, every float (negatives and -0 included) has smaller bits.
+BT_ITCM inline bool Below(float x, float c) { return Bits(x) < Bits(c); }
+BT_ITCM inline bool Above(float x, float c) { return Bits(x) > Bits(c); }
+// min and max of non-NaN a and b, on the Seed vminnm and vmaxnm (no compare); they differ from std::min and std::max
+// only on +0 against -0, so they replace them where the operands cannot be zeros of opposite signs.
+BT_ITCM inline float Min(float a, float b) { return std::fmin(a, b); }
+BT_ITCM inline float Max(float a, float b) { return std::fmax(a, b); }
+// x clamped to [lo, hi], lo <= hi, x not NaN (as std::clamp, where x and the bounds cannot be zeros of opposite signs).
+BT_ITCM inline float Clamp(float x, float lo, float hi) { return std::fmin(std::fmax(x, lo), hi); }
+
 // Underflow guard for recirculating state: magnitudes below the threshold (1e-15, about -300 dBFS) become exact 0, so
 // tails end in true silence and host builds (no FZ) never run on denormals. FPSCR.FZ on the Seed only covers
-// denormals.
-BT_ITCM inline float Flush(float v) { return std::fabs(v) < 1e-15f ? 0.0f : v; }
+// denormals. Tested on the bits (|v| < 1e-15f exactly, NaN kept).
+BT_ITCM inline float Flush(float v) {
+    return (std::uint32_t(Bits(v)) & 0x7FFFFFFFu) < std::uint32_t(Bits(1e-15f)) ? 0.0f : v;
+}
 
 // The linear gain of db decibels (always_inline: a template's out-of-line copy loses BT_ITCM, ../memory.h).
 template <class T> [[gnu::always_inline]] inline T DbToGain(T db) { return std::pow(T(10), db / T(20)); }
 
-// tanh-like: slope 1 at 0, reaches +-1 at +-3 with zero slope.
+// tanh-like: slope 1 at 0, reaches +-1 at +-3 with zero slope. The polynomial is exactly +-1 at +-3, so the clamp
+// (no compares) gives the same value as the branches beyond.
 BT_ITCM inline float SoftClip(float x) {
-    if (x >= 3.0f) return 1.0f;
-    if (x <= -3.0f) return -1.0f;
+    x = Clamp(x, -3.0f, 3.0f);
     return x * (27.0f + x * x) / (27.0f + 9.0f * x * x);
 }
 
@@ -153,6 +180,7 @@ public:
         y_ = value;
     }
     BT_ITCM float Process(float target) {
+        if (SameBits(y_, target)) return y_;  // at rest: no float compares
         if (y_ < target) y_ = std::min(y_ + step_, target);
         else if (y_ > target) y_ = std::max(y_ - step_, target);
         return y_;
@@ -210,11 +238,11 @@ struct NoiseGate {
     }
     void Clear() { env = 0.0f; }
     BT_ITCM void Follow(float x) {
-        env = std::max(std::fabs(x), env * rel);
-        if (env < kNoiseGateFloor) env = 0.0f;
+        env = Max(std::fabs(x), env * rel);
+        if (Below(env, kNoiseGateFloor)) env = 0.0f;
     }
-    BT_ITCM bool Open() const { return env > 0.0f; }
-    BT_ITCM float Level() const { return std::min(1.0f, env / kNoiseGateFull); }
+    BT_ITCM bool Open() const { return IsPositive(env); }
+    BT_ITCM float Level() const { return Min(1.0f, env / kNoiseGateFull); }
 };
 
 // xorshift32; s must not be 0.
@@ -300,23 +328,25 @@ inline void Carve(float*& p, Line& l, int cap) {
 }
 
 // l read d behind, d clamped to [lo, cap - 2].
-BT_ITCM inline float Tap(const Line& l, float d, float lo) { return l.Read(std::clamp(d, lo, float(l.cap - 2))); }
+BT_ITCM inline float Tap(const Line& l, float d, float lo) { return l.Read(Clamp(d, lo, float(l.cap - 2))); }
 
 // A value gliding to its target: the rate chases a * (target - x), limited to +-maxRate, with inertia b, and snaps to
 // the target within eps. Kept as an error relative to the target, so the approach never stalls on float resolution at
-// large values.
+// large values. Process is noclone: a local clone (.constprop) beside an out-of-line COMDAT copy in one translation
+// unit is a section type conflict (../memory.h), which the bench image's inlining produces.
 struct Glide {
     float t = 0.0f, e = 0.0f, v = 0.0f;  // target, x - target, rate
-    BT_ITCM float Process(float target, float a, float b, float maxRate, float eps) {
+    [[gnu::noclone]] BT_ITCM float Process(float target, float a, float b, float maxRate, float eps) {
+        if (SameBits(target, t) && IsZero(e) && IsZero(v)) return t;  // at rest: no float compares
         if (target != t) {
             e += t - target;
             t = target;
         }
         if (e == 0.0f && v == 0.0f) return t;
-        const float vT = std::clamp(-e * a, -maxRate, maxRate);
+        const float vT = Clamp(-e * a, -maxRate, maxRate);
         v += b * (vT - v);
         e += v;
-        if (std::fabs(e) < eps && std::fabs(v) < eps * 1e-2f) e = v = 0.0f;
+        if (Below(std::fabs(e), eps) && Below(std::fabs(v), eps * 1e-2f)) e = v = 0.0f;  // eps > 0
         return t + e;
     }
     BT_ITCM float Value() const { return t + e; }

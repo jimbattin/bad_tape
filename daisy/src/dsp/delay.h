@@ -22,9 +22,8 @@
 // forward skips the grains entirely. The caller decides the direction (the engine keeps the last one while SW1 is
 // off). The SOS head reverses on its own grains over the SOS line, turning around where the head plays (overdub: at 2,
 // one pass newer), then in windows of delay_sos_length capped at SosRevMaxHop (301: 60.05 s; a longer length gets
-// 60.05 s windows and a shorter first grain, 53 ms at 120 s), the head's delay (501; its grains do not wobble: the load
-// budget) or half the loop (overdub). The SOS line records forward, and the 501 feedback and the overdub keep take
-// the forward head.
+// 60.05 s windows and a shorter first grain, 53 ms at 120 s), the head's delay (501, wobbling) or half the loop
+// (overdub). The SOS line records forward, and the 501 feedback and the overdub keep take the forward head.
 // Sound on sound (delay_sos_mode, delay_sos): a second line (SosLine, caller-provided; 44 MiB of SDRAM on the Seed)
 // records what the loop writes, every sample in every mode, and one more head reads it into the wet, through the
 // same output-only colors as the repeats (bit inversion, tape bump and hiss). delay_sos fades the head in and out
@@ -100,7 +99,7 @@ BT_ITCM inline float Hermite(float x0, float x1, float x2, float x3, float f) {
 // Unity up to kLimitKnee, C1 at the knee, approaching 1.0, which it reaches at kLimitKnee + 3 (1 - kLimitKnee) = 2.0.
 BT_ITCM inline float SoftLimit(float v) {
     const float a = std::fabs(v);
-    if (a <= kLimitKnee) return v;
+    if (!Above(a, kLimitKnee)) return v;
     return std::copysign(kLimitKnee + (1.0f - kLimitKnee) * SoftClip((a - kLimitKnee) / (1.0f - kLimitKnee)), v);
 }
 
@@ -444,15 +443,15 @@ public:
         if (!fade_.on) {
             if (glideT_) {
                 head_[active_] = glide_.Process(targetD_, gc_.a, gc_.b, kTapeGlideMaxRate, 1e-3f);
-            } else if (targetD_ != head_[active_]) {
+            } else if (!SameBits(targetD_, head_[active_])) {  // heads >= 2: same bits is equality
                 head_[active_ ^ 1] = targetD_;
                 fade_.Start(fadeLen_);
             }
         }
         const float boff = bbdLfo_.Process(head_[active_]);  // every sample: the LFO counts samples
-        const bool moved = tapeOn || boff != 0.0f;
+        const bool moved = tapeOn || !IsZero(boff);
         const float off = (tapeOn ? mod : 0.0f) + boff;
-        const auto pos = [&](float h) { return moved ? std::clamp(h + off, 2.0f, float(kDelaySamples - 3)) : h; };
+        const auto pos = [&](float h) { return moved ? Clamp(h + off, 2.0f, float(kDelaySamples - 3)) : h; };
         float wF = Read(pos(head_[active_]));
         if (fade_.on) {
             wF = fade_.Mix(wF, Read(pos(head_[active_ ^ 1])));
@@ -463,12 +462,12 @@ public:
         }
         if (tapeOn) wF *= drop;
         float w = wF, r = 0.0f;  // r: the direction ramp, 0 forward .. 1 reverse
-        if (revT_ > 0.0f || rev_.Value() > 0.0f) {  // a branch, not a zero gain: forward stays bit-identical
+        if (IsPositive(revT_) || IsPositive(rev_.Value())) {  // a branch, not a zero gain: forward stays bit-identical
             float wR = grains_.Process([&](float d) { return Read(pos(d)); });
             if (tapeOn) wR *= drop;
             r = rev_.Process(revT_);
             w = wF + SmoothStep(r) * (wR - wF);
-            if (r == 0.0f && revT_ == 0.0f) {
+            if (IsZero(r) && IsZero(revT_)) {
                 grains_.Reset();
                 sosGrains_.Reset();
             }
@@ -521,7 +520,7 @@ private:
     // v crossfaded by on (0..1) into stage b's output. b runs only while on > 0 and is reset when on falls to 0, so the
     // next switch-in starts from silence (live: b ran since its last reset).
     BT_ITCM static float ThroughBbd(Bbd& b, bool& live, float on, float v) {
-        if (on > 0.0f) {
+        if (IsPositive(on)) {
             live = true;
             return v + on * (b.Process(v) - v);
         }
@@ -560,7 +559,7 @@ private:
         const float gOut = sosOut_.Step(), gFb = sosFbIn_.Step(), gKeep = sosKeep_.Step();
         sosHead_[sosActive_] += sosStep_;
         const auto sp = [&](int k) {
-            return sosWob_[k] && moved ? std::clamp(sosHead_[k] + off, 2.0f, sosMax_) : sosHead_[k];
+            return sosWob_[k] && moved ? Clamp(sosHead_[k] + off, 2.0f, sosMax_) : sosHead_[k];
         };
         float s = ReadSos(sp(sosActive_));
         if (sosFade_.on) {
@@ -572,16 +571,17 @@ private:
             }
         }
         float heard = s;  // the SOS wet: the forward head, or crossfaded to the reverse grains by SW1's ramp
-        if (r > 0.0f) {
+        if (IsPositive(r)) {
             // Fresh grains turn around where the head plays (overdub: at 2, the same loop position one pass newer,
             // which keeps the grains on the loop's grid).
             if (sosGrains_.Idle()) sosGrains_.Reset(sosMode_ == btctl::SosMode::kOverdub ? 2.0f : sosHead_[sosActive_]);
-            // 501's grains do not wobble (the load budget: whole-sample reads skip the Hermite).
-            const float sR = sosGrains_.Process([&](float d) { return ReadSos(std::min(d, sosMax_)); });
+            const bool wob = moved && sosMode_ == btctl::SosMode::k501;  // 501's grains wobble like its head
+            const float sR = sosGrains_.Process(
+                [&](float d) { return ReadSos(Min(wob ? Max(d + off, 2.0f) : d, sosMax_)); });
             heard = s + SmoothStep(r) * (sR - s);
         }
         const float v = WriteLoop(gx + fb * (wF + gFb * s), bsc);  // 501: the forward head feeds the loop
-        StoreSos(gKeep > 0.0f ? SoftLimit(v + gKeep * s) : v);    // overdub: the line keeps its forward loop
+        StoreSos(IsPositive(gKeep) ? SoftLimit(v + gKeep * s) : v);  // overdub: the line keeps its forward loop
         return tape_.Playback(crush_.InvertBits(w + gOut * heard));
     }
 
@@ -657,7 +657,7 @@ private:
         const size_t di = size_t(d);
         const float f = d - float(di);
         const size_t i1 = sosW_ >= di ? sosW_ - di : sosW_ + sosN_ - di;
-        if (f == 0.0f) return sos_[i1];  // a whole delay (301, overdub): the sample itself, as Hermite gives it
+        if (IsZero(f)) return sos_[i1];  // a whole delay (301, overdub): the sample itself, as Hermite gives it
         const size_t i0 = i1 + 1 == sosN_ ? 0 : i1 + 1;
         const size_t i2 = i1 == 0 ? sosN_ - 1 : i1 - 1;
         const size_t i3 = i2 == 0 ? sosN_ - 1 : i2 - 1;

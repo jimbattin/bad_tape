@@ -171,15 +171,15 @@ public:
             }
             // 1. Glides.
             const float s =
-                std::clamp(size_.Process(sizeT_, gc_.aSize, gc_.b, sizeRate, 1e-7f), kPlateSizeMin, kPlateSizeMax);
-            const float pd = std::max(1.0f, pre_.Process(preT_, gc_.a, gc_.b, kGlideMaxRate, 1e-3f));
+                Clamp(size_.Process(sizeT_, gc_.aSize, gc_.b, sizeRate, 1e-7f), kPlateSizeMin, kPlateSizeMax);
+            const float pd = Max(1.0f, pre_.Process(preT_, gc_.a, gc_.b, kGlideMaxRate, 1e-3f));
 
             // 2. Input: HF BANDWIDTH, predelay, the gate envelope.
             const float x = in[i];
             const float bw = bw_.Process(x, aBw_);
             const float xp = kPlateInGain * Tap(in_, pd, 1.0f);
             in_.Write(bw);
-            env_ = Flush(std::max(std::fabs(x), env_ * rel_));
+            env_ = Flush(Max(std::fabs(x), env_ * rel_));
             if (env_ < thr_) quiet_ = std::min(quiet_ + 1, kQuietMax);
             else quiet_ = 0;
 

@@ -145,7 +145,7 @@ public:
         }
         const float lp = pre_.Process(v);
         phase_ += inc_;
-        if (phase_ >= 1.0f) {
+        if (!Below(phase_, 1.0f)) {
             phase_ -= 1.0f;
             const float x = drive_ * lp;
             float s = SoftClip(x);
@@ -158,8 +158,8 @@ public:
     // After Process, never fed back: bit inversion.
     BT_ITCM float InvertBits(float w) {
         const float a = std::fabs(w);
-        env_ = std::max(a, Flush(env_ * rel_));
-        if (!(bits_ > 0.0f)) return w;
+        env_ = Max(a, Flush(env_ * rel_));
+        if (!IsPositive(bits_)) return w;
         if (!fade_.on && maskT_ != mask_) {
             prevMask_ = mask_;
             mask_ = maskT_;
@@ -170,13 +170,13 @@ public:
             x = fade_.Weight();
             fade_.Advance();
         }
-        if (a < kInvertDead) return w;
+        if (Below(a, kInvertDead)) return w;
         float b = InvertedWord(w, mask_);
         if (x < 1.0f) {
             const float b0 = InvertedWord(w, prevMask_);
             b = b0 + x * (b - b0);
         }
-        const float l = std::min(1.0f, env_ * (1.0f / kInvertFull));
+        const float l = Min(1.0f, env_ * (1.0f / kInvertFull));
         return w + bits_ * l * l * (b - w);
     }
 

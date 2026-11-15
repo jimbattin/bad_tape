@@ -86,14 +86,14 @@ public:
     // Per sample: the read-position offset in samples for a head d samples back.
     BT_ITCM float Process(float d) {
         phase_ += inc_;
-        if (phase_ >= 1.0f) phase_ -= 1.0f;
-        if (depth_ == 0.0f && off_ == 0.0f) return 0.0f;
+        if (!Below(phase_, 1.0f)) phase_ -= 1.0f;
+        if (IsZero(depth_) && IsZero(off_)) return 0.0f;
         float target = 0.0f;
-        if (depth_ > 0.0f) {
+        if (IsPositive(depth_)) {
             const float m = depth_ * (4.0f * std::fabs(phase_ - 0.5f) - 1.0f);
             target = -d * m / (1.0f + m);
         }
-        off_ += std::clamp(target - off_, -kBbdModMaxRate, kBbdModMaxRate);
+        off_ += Clamp(target - off_, -kBbdModMaxRate, kBbdModMaxRate);
         return off_;
     }
     float Offset() const { return off_; }
@@ -151,11 +151,11 @@ public:
     // Per sample, in the loop or on the input.
     BT_ITCM float Process(float v) {
         gate_.Follow(v);
-        const float g = kBbdRef / std::max(envC_, kBbdFloor);
+        const float g = kBbdRef / Max(envC_, kBbdFloor);
         const float s = SoftClip(drive_ * pre_.Process(v * g)) * invDrive_;
         envC_ = Follow(envC_, s);
         phase_ += inc_;
-        if (phase_ >= 1.0f) {
+        if (!Below(phase_, 1.0f)) {
             phase_ -= 1.0f;
             h1_ = h0_;
             h0_ = s + (phase_ / inc_) * (prev_ - s);  // the clock ticked phase_ / inc_ samples ago
@@ -169,9 +169,10 @@ public:
     }
 
 private:
+    // e >= 0 and r = |x| (never -0), so r > e compares as integers.
     BT_ITCM float Follow(float e, float x) const {
         const float r = std::fabs(x);
-        return Flush(e + (r > e ? atk_ : rel_) * (r - e));
+        return Flush(e + (Bits(r) > Bits(e) ? atk_ : rel_) * (r - e));
     }
 
     float fs_ = 0.0f;  // Init

@@ -30,7 +30,8 @@ namespace {
 // Block counts for a duration, so a stage covers the same audio time whatever kBlockSize is.
 constexpr int MsBlocks(int ms) { return int(size_t(ms) * size_t(btdsp::kSampleRate) / 1000 / kBlockSize); }
 constexpr int kWarmBlocks = MsBlocks(200), kRunBlocks = MsBlocks(2000), kNoiseBlocks = 64;
-constexpr int kSweepBlocks = MsBlocks(20);  // the sweeps' half period
+constexpr int kSweepBlocks = MsBlocks(20);        // the sweeps' half period
+constexpr int kLaunchPreBlocks = MsBlocks(3000);  // the launch stage's untimed pre-roll
 constexpr uint32_t kPassGapMs = 2000;
 constexpr btctl::DelayType kDelayTypes[] = {btctl::DelayType::kBbd, btctl::DelayType::kTape,
                                             btctl::DelayType::kDigital};  // the bench order
@@ -75,7 +76,7 @@ BT_DTCM btdsp::HalfRateReverb gResample;
 BT_DTCM btctl::ToggleFilter gToggleFilter[3];
 BT_DTCM float gNoise[kBlockSize * kNoiseBlocks];
 BT_DTCM float gL[kBlockSize], gR[kBlockSize], gOut[kBlockSize];
-BT_SDRAM float gDelayMem[btdsp::kDelaySamples];
+BT_SDRAM_BANK float gDelayMem[btdsp::kDelaySamples];
 BT_SDRAM float gSosMem[btdsp::kSosSamples];
 BT_SDRAM float gReverbSlow[btdsp::kReverbSlowFloats];
 BT_D2 float gReverbFast[btdsp::kReverbFastFloats];
@@ -233,6 +234,11 @@ void initEngine(int mode, int algo) {
     gEngine.SetParam(btparam::kReverbAlgo, float(algo));
 }
 
+// The whole chain, untimed, for blocks.
+void preRoll(int blocks) {
+    for (int k = 0; k < blocks; ++k) gEngine.Process(gNoise + size_t(k % kNoiseBlocks) * kBlockSize, gOut, kBlockSize);
+}
+
 void runPass(unsigned pass) {
     btusb::Log("bench pass %u budget %lu cycles", pass, (unsigned long)gBudget);
     btusb::ServeHelloDfu(logBoot);
@@ -290,6 +296,11 @@ void runPass(unsigned pass) {
     // The EQ's gains flipped every 20 ms inside the whole chain (reverse, Plate: the pedal's worst row).
     initEngine(0, 0);
     timeStage("engine eq sweep rev plate", blockEngineEqSweep);
+    // The same from 3 s after the flip (an untimed pre-roll): the measured run holds the 20 ms in which the main head's
+    // and the SOS head's grains (its 4 s turnaround grain, 8 s back, ends with a 2 s main window) both crossfade.
+    initEngine(0, 0);
+    preRoll(kLaunchPreBlocks);
+    timeStage("engine eq sweep rev plate launch", blockEngineEqSweep);
 
     btusb::Log("bench pass %u done", pass);
     btusb::ServeHelloDfuFor(kPassGapMs, logBoot);

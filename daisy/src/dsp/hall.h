@@ -210,7 +210,7 @@ public:
             }
             // 1. Glides.
             const float s = Scale(size_.Process(sizeT_, gc_.aSize, gc_.b, sizeRate, 1e-7f));
-            const float pd = std::max(1.0f, pre_.Process(preT_, gc_.a, gc_.b, kGlideMaxRate, 1e-3f));
+            const float pd = Max(1.0f, pre_.Process(preT_, gc_.a, gc_.b, kGlideMaxRate, 1e-3f));
             const float wStep = spread_.Process(spreadT_, gc_.a, gc_.b, kGlideMaxRate, 1e-3f) * s *
                                 (1.0f / float(kHallSpreadTaps - 1));
             float ed[4];
@@ -267,7 +267,7 @@ private:
     static constexpr int kTapA = 0, kTapLine = 1, kTapB = 2;
 
     // The SIZE glide's length scale, held to the table's SIZE range (HallReadsInRange's proof depends on it).
-    static BT_ITCM float Scale(float glide) { return std::clamp(glide, kHallScaleMin, kHallScaleMax); }
+    static BT_ITCM float Scale(float glide) { return Clamp(glide, kHallScaleMin, kHallScaleMax); }
 
     // Tank half K on x (the diffused input plus the other half's previous output); every element reads at its random
     // tap. Compile-time K: the lengths and the state are constants (always_inline: ../memory.h).
@@ -411,11 +411,11 @@ private:
             t.fade.Start(std::max(1, int(period_ * mv.fade)));
             t.count = int(period_ * mv.every * (0.85f + 0.3f * rng_.Uniform()));
         }
-        float y = l.Read(std::max(2.0f, nominal + t.off[t.active]));
+        float y = l.Read(Max(2.0f, nominal + t.off[t.active]));
         if (t.fade.on) {
             // Not Crossfade::Mix: reading the line before the weight costs a callee-saved register here (+3.3 ‰ on
             // the bench's Hall).
-            y += t.fade.Weight() * (l.Read(std::max(2.0f, nominal + t.off[1 - t.active])) - y);
+            y += t.fade.Weight() * (l.Read(Max(2.0f, nominal + t.off[1 - t.active])) - y);
             if (t.fade.Advance()) t.active ^= 1;
         }
         --t.count;
