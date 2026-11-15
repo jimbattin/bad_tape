@@ -32,6 +32,8 @@ constexpr int MsBlocks(int ms) { return int(size_t(ms) * size_t(btdsp::kSampleRa
 constexpr int kWarmBlocks = MsBlocks(200), kRunBlocks = MsBlocks(2000), kNoiseBlocks = 64;
 constexpr int kSweepBlocks = MsBlocks(20);  // the sweeps' half period
 constexpr uint32_t kPassGapMs = 2000;
+constexpr btctl::DelayType kDelayTypes[] = {btctl::DelayType::kBbd, btctl::DelayType::kTape,
+                                            btctl::DelayType::kDigital};  // the bench order
 
 // The worst-case settings (daisy/README.md "Performance"; the device runs use the same list).
 constexpr struct {
@@ -237,13 +239,13 @@ void runPass(unsigned pass) {
     timeStage("controls", blockControls);
 
     for (bool reverse : {false, true}) {
-        for (btctl::DelayType type : {btctl::DelayType::kBbd, btctl::DelayType::kTape, btctl::DelayType::kDigital}) {
+        for (btctl::DelayType type : kDelayTypes) {
             char name[32];
             snprintf(name, sizeof name, "delay %s %s", reverse ? "rev" : "fwd", btctl::Name(type));
             stageDelay(name, reverse, type);
         }
     }
-    for (btctl::DelayType type : {btctl::DelayType::kBbd, btctl::DelayType::kTape, btctl::DelayType::kDigital}) {
+    for (btctl::DelayType type : kDelayTypes) {
         char name[32];
         snprintf(name, sizeof name, "delay fwd %s all", btctl::Name(type));
         stageDelay(name, false, type, true);
@@ -278,7 +280,7 @@ void runPass(unsigned pass) {
     initEngine(0, 1);
     timeStage("engine sw3 switch", blockEngineSw3);
     // Knob 4 swept 10 <-> 2000 ms every 20 ms: tape and BBD glide, digital crossfades.
-    for (btctl::DelayType type : {btctl::DelayType::kBbd, btctl::DelayType::kTape, btctl::DelayType::kDigital}) {
+    for (btctl::DelayType type : kDelayTypes) {
         char name[40];
         snprintf(name, sizeof name, "engine time sweep %s", btctl::Name(type));
         initEngine(2, 1);

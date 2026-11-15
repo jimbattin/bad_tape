@@ -342,7 +342,7 @@ private:
         const float rt = 1.0f / rtRate;
         period_ = Period(spin);
         depth_ = wander / 100.0f * kHallWanderMaxMs * kReverbRate / 1000.0f * s;
-        constexpr float kLn1000 = 6.9077553f, kDbToLn = 0.11512925f;  // ln(10) / 20
+        constexpr float kDbToLn = 0.11512925f;  // ln(10) / 20
         aX_ = OnePoleCoef(xover, fs_);
         aRtHf_ = OnePoleCoef(rtHf, fs_);
         // RT MID holds at kHallRtRefHz: the loop's gain there (crossover bleed of the bass gain, RT HF CUT, and the
@@ -381,7 +381,8 @@ private:
         gIn2_ = 0.625f * d;
         // The loop allpasses' own recirculation (c per d samples) must decay well inside RT MID, or their modes
         // outlast it: c is held to kHallApRing x the RT decay over the longer allpass B.
-        const float ringMax = kHallApRing * std::exp(-6.9077553f * float(kHallApB[0]) * s / (rt * fs_));
+        const float ringMax =
+            kHallApRing * std::exp(-kLn1000 * float(std::max(kHallApB[0], kHallApB[1])) * s / (rt * fs_));
         c_ = std::min(0.6f * (0.4f + 0.6f * d), ringMax);
         for (int j = 0; j < 4; ++j) {
             const float g = key[kKeyEcho + j];
@@ -412,7 +413,7 @@ private:
         }
         float y = l.Read(std::max(2.0f, nominal + t.off[t.active]));
         if (t.fade.on) {
-            y += t.fade.Weight() * (l.Read(std::max(2.0f, nominal + t.off[1 - t.active])) - y);
+            y = t.fade.Mix(y, l.Read(std::max(2.0f, nominal + t.off[1 - t.active])));
             if (t.fade.Advance()) t.active ^= 1;
         }
         --t.count;

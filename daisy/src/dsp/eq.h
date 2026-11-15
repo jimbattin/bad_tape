@@ -72,7 +72,7 @@ BT_ITCM inline SvfCoefs Design(Kind kind, double f0, double q, double db, double
 // One section in float, its coefficients designed in double. A coefficient change ramps linearly over a control tick:
 // a step in a coefficient is a step in the output.
 struct SectionF {
-    SvfT<float> svf;
+    Svf svf;
     float m0 = 1.0f, m1 = 0.0f, m2 = 0.0f;
     float to[6] = {}, step[6] = {};  // the ramp's target {a1, a2, a3, m0, m1, m2} and per-sample step
     int ramp = 0;                    // samples left in the ramp

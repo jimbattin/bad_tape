@@ -16,8 +16,8 @@
 //   publish that stored a value; the callback scans gParam only when gParamGen moved (acquire), so it misses no update
 //   and skips the kParamCount-entry scan otherwise.
 // Memory (memory.h; the map is in daisy/README.md): AudioCallback and the DSP's per-sample and per-tick functions run
-// from ITCM; the engine and the callback's own state live in DTCM; the delay line and the reverb pool's slow region in
-// SDRAM, the pool's fast region in D2 SRAM. FPSCR.FZ is on (denormals flush to zero).
+// from ITCM; the engine and the callback's own state live in DTCM; the delay line, the SOS line and the reverb pool's
+// slow region in SDRAM, the pool's fast region in D2 SRAM. FPSCR.FZ is on (denormals flush to zero).
 #include <algorithm>
 #include <atomic>
 #include <cmath>

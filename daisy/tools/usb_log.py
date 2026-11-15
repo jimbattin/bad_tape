@@ -34,8 +34,9 @@ the MIDI Identity Request once the pedal is connected and prints its reply as
 `-- identity device 62 board 1 build <build id>`.
 
 Parameters (docs/MIDI.md; the table comes from the pedal's SysEx DUMP; only
-the enum codes, CONTROL_NAMES and the tapers, mirror daisy/src/params.h). These run once the pedal is connected (after --identity and
---dfu); the script then exits, with SECONDS as the overall deadline:
+the enum codes, CONTROL_NAMES, CODE_MAX and the tapers mirror
+daisy/src/params.h). These run once the pedal is connected (after --identity
+and --dfu); the script then exits, with SECONDS as the overall deadline:
     --dump               print `id name value unit [min..max] control cc`
     --get NAME           print `-- value NAME = V UNIT (code C)`, after any --set
     --set NAME=VALUE     set in engineering units (a MIDI write: held until
@@ -108,7 +109,6 @@ class Param:
     taper: int
     control: int
     cc: int
-    group: int
     def_code: int
     cur_code: int
     name: str
@@ -120,7 +120,7 @@ class Param:
     def parse(cls, msg: bytes) -> 'Param':
         p = msg[5:-1]
         parts = p[10:].decode('ascii', errors='replace').split('|')
-        return cls(p[0] << 7 | p[1], p[2], p[3], p[4], p[5], p[6] << 7 | p[7], p[8] << 7 | p[9], parts[0],
+        return cls(p[0] << 7 | p[1], p[2], p[3], p[4], p[6] << 7 | p[7], p[8] << 7 | p[9], parts[0],
                    '|'.join(parts[1:-2]), float(parts[-2]), float(parts[-1]))
 
     def value(self, code: int) -> float:

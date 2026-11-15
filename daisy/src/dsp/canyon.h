@@ -121,8 +121,8 @@ public:
                 Tick();
             }
             const float xt = in_.Step() * in[i];
-            float u = diff_[0].Process(xt, float(kCanyonDiff[0]), kCanyonDiffGain);
-            u = diff_[1].Process(u, float(kCanyonDiff[1]), kCanyonDiffGain) * kInvSqrt6;
+            float u = diff_[0].Feed(xt, diff_[0].line.ReadAt(kCanyonDiff[0]), kCanyonDiffGain);
+            u = diff_[1].Feed(u, diff_[1].line.ReadAt(kCanyonDiff[1]), kCanyonDiffGain) * kInvSqrt6;
 
             // Every line read before its write.
             float y[kCanyonLines], sum = 0.0f;
@@ -161,7 +161,7 @@ private:
         }
         float y = Tap(line_[j], base_[j] + sweep, 1.0f);
         if (f.on) {
-            y += f.Weight() * (Tap(line_[j], next_[j] + sweep, 1.0f) - y);
+            y = f.Mix(y, Tap(line_[j], next_[j] + sweep, 1.0f));
             if (f.Advance()) {
                 base_[j] = next_[j];
                 glide_[j].Snap(next_[j]);  // gliding turned on mid-fade continues from the new base
