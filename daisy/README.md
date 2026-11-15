@@ -180,35 +180,35 @@ The stages:
 - `engine fwd|off|rev plate|hall|canyon`: `btdsp::Engine` (the whole chain) at `kWorst` for each SW1 × SW3 position.
 - Control paths, all at `kWorst`: `engine sw3 switch` (reverse, Hall → Plate at measured block 0: the fade-out, the ~15 ms pool clear and the fade-in all inside the run); `engine time sweep bbd|tape|digital` (forward, Hall, `delay_time` 10 ↔ 2000 ms every 20 ms, each type at full color: BBD and tape glide the head, digital crossfades two heads); `engine eq sweep rev plate` (reverse, Plate: the pedal's worst row, the EQ's five gains flipped between ±12 dB every 20 ms). Maximum feedback (110 %) is in every engine stage.
 
-Measured 2026-11-14 (build d115a92) at 96 kHz, 32-sample blocks, with every color's scope at its default, all, and sound on sound on as in `kWorst` (3 passes; avg the median pass, max the highest), ‰ of the 160 000-cycle block:
+Measured 2026-11-14 (build 2d789bf) at 96 kHz, 32-sample blocks, with every color's scope at its default, all, and sound on sound on as in `kWorst` (2 passes; avg the median pass, max the highest), ‰ of the 160 000-cycle block:
 
 |Stage|avg ‰|max ‰|
 |---|---|---|
-|`controls`|4.7|8.3|
-|`delay fwd bbd`|250.6|254.0|
-|`delay rev bbd`|286.8|327.6|
-|`delay fwd bbd all`|290.4|293.9|
-|`plate worst`|251.2|261.3|
-|`hall worst`|227.4|254.7|
-|`canyon worst`|102.1|106.9|
+|`controls`|4.7|8.2|
+|`delay fwd bbd`|250.6|253.5|
+|`delay rev bbd`|286.8|328.1|
+|`delay fwd bbd all`|290.4|293.6|
+|`plate worst`|251.0|261.0|
+|`hall worst`|224.1|252.5|
+|`canyon worst`|102.1|106.0|
 |`resample`|22.5|22.7|
-|`eq worst`|62.9|63.3|
+|`eq worst`|62.9|63.2|
 |`eq sweep`|110.6|120.3|
-|`engine fwd plate`|695.6|705.6|
-|`engine fwd hall`|670.7|703.7|
-|`engine fwd canyon`|542.3|548.7|
-|`engine rev plate`|731.7|763.6|
-|`engine rev hall`|706.7|747.8|
-|`engine rev canyon`|578.1|609.4|
-|`engine sw3 switch`|730.7|761.3|
-|`engine time sweep bbd`|690.3|722.6|
-|`engine eq sweep rev plate`|781.8|816.1|
+|`engine fwd plate`|695.4|707.3|
+|`engine fwd hall`|669.6|700.8|
+|`engine fwd canyon`|542.3|550.6|
+|`engine rev plate`|731.5|764.2|
+|`engine rev hall`|705.5|746.3|
+|`engine rev canyon`|578.1|606.0|
+|`engine sw3 switch`|730.5|760.1|
+|`engine time sweep bbd`|689.0|716.2|
+|`engine eq sweep rev plate`|781.6|818.7|
 
 At 96 kHz the delay, the input colors, the EQ and the mixing cost twice their 48 kHz share; the reverbs run at 48 kHz (`HalfRateReverb`), so their rows are unchanged, and the resampler adds 22.5 ‰. A color stage that is off (the loop's and the input's crush and tape with the BBD selected) runs no filters and starts them warm (`delay fwd bbd all` 321.6 → 215.3, the `engine` rows −110 ‰). Another, output-identical, cut the Plate: its tank and tap reads are range-proved at compile time (`PlateReadsInRange`) and read unclamped, its 30 output taps are unrolled with constant lines and delays, and its input diffusers read at their integer lengths without interpolation (`plate worst` 327.7 → 245.2, the `engine * plate` rows −83 ‰; the bench image calls `Line::Read` out of line from `Plate::Process`, the pedal image inlines it). Then the Hall, bit-identical: its tank and output-tap reads are range-proved (`HallReadsInRange`, with the SIZE glide held to the table range) and read unclamped, its two tank halves are unrolled with constant lengths, its input diffusers read at their integer lengths, and a control tick whose inputs (the smoothed values, SIZE, SPREAD, the echo targets) are unchanged skips the coefficient recomputation (about 20 `expf` and 2 `powf`); and, by rounding only, its SPREAD step multiplies by 1/3 and its SPREAD weights age by one `expf` and a running product (`hall worst` 257.7 → 211.7, `engine fwd hall` 668.0 → 622.2, `engine rev hall` 719.6 → 671.8). A reciprocal in `Crossfade` (shared by the Hall, the Canyon, the digital heads and the crush mask) was measured and not kept: −8 ‰ on `engine fwd hall` but +6 to +12 ‰ on the standalone delay stages and +2 to +4 ‰ on `engine rev canyon` and `engine eq sweep rev plate`, a code-layout effect. The blocks run from ITCM, and the bench runs the pedal's MPU setup.
 
 Sound on sound (2026-11-14, against the same bench before it: `delay fwd bbd` 184.6, `engine fwd plate` 629.1, `engine eq sweep rev plate` 724.2/756.4). Off (`delay_sos` 0), `Delay::Process` is the delay's own loop plus one store to the SOS line: `delay fwd bbd` 194.9, `delay fwd bbd all` 251.9, `engine fwd plate` 658.3, `engine eq sweep rev plate` 741.8/775.6; removing the store moved these within ±10 ‰ either way, so the rest is code layout (GCC's inlining across the translation unit moves with any added code: the reverbs' `Process` changed size with no change of their own). On, in 501 at ratio 4, it adds 68 ‰ to `delay fwd bbd` and 40 ‰ to the engine rows. A first version with the head inlined into `Delay::Process` cost 30 ‰ idle (its registers) and 97 ‰ on (its five ramps and smoothers 27, the line read 34, the glide and crossfade bookkeeping 22: serial float compares and `vmrs` every sample), with the worst row at 847.3 ‰; `ProcessSos` now runs out of line and `SosTick` moves the ramps, the smoothers and the 501 glide to the control tick, leaving three linear gain steps and the read per sample. A prefetch 16 samples ahead of the head, and moving the SOS line 2 KB against the delay line's D-cache sets, changed nothing (±0.1 ‰).
 
-The output-identical cleanup after sound on sound (d115a92, against the bench of 9dace59): the Canyon's input diffusers read at their integer lengths (`canyon worst` 108.8 → 102.1, `engine fwd|rev canyon` −10.6 and −10.1 ‰), and GCC's inlining moved with it: `Butterworth4::Process` would have gone out of line (it is now `always_inline`, inlined as before), `Hall::TapRead` is inlined into `Hall::Process` at one call (`hall worst` 220.0 → 227.4, `engine fwd|rev hall` +3.5 and +4.0 ‰), and the BBD delay stages fell 9 to 12 ‰ (`delay fwd bbd` 263.0 → 250.6). The worst row, `engine eq sweep rev plate`, moved 783.7/821.1 → 781.8/816.1. On the pedal every row's avg range and max stayed within 5 ‰ of 9dace59's.
+The output-identical cleanup after sound on sound (d115a92 and 2d789bf against 9dace59, all three benched 2026-11-14): the Canyon's input diffusers read at their integer lengths (`canyon worst` 108.8 → 102.1, `engine fwd|rev canyon` −10.6 and −10.1 ‰); the delay stages fell 4 to 19 ‰ (`delay fwd bbd` 263.0 → 250.6, `delay fwd digital all` 216.4 → 197.2), the Delay's own cuts and code layout together (not separated); GCC's inlining moved with the Canyon change, and `Butterworth4::Process`, which went out of line, is now `always_inline` (inlined as before). `Crossfade::Mix` in `Hall::TapRead` read the line before the weight and cost `TapRead` a callee-saved register on its six calls per 48 kHz sample (`hall worst` 220.1 → 227.4); `TapRead` keeps its own blend (2d789bf: 224.1, `engine * hall` rows −1 ‰). The other 4 ‰ came with identical `Hall::Process` and `TapRead` instructions and data addresses, the code shifted 352 B in ITCM: code layout. `[[gnu::noinline]]` on `TapRead` changes nothing on the bench (that image never inlined it) and in the pedal image moves `Crush::Process` and `Crush::InvertBits` into `Delay::Process`, so it was not kept. The worst row, `engine eq sweep rev plate`, 783.7/820.5 → 781.6/818.7. On the pedal (d115a92) every row's avg range and max stayed within 5 ‰ of 9dace59's.
 
 ### Reverb pool placement
 
@@ -224,7 +224,7 @@ D2 wins for all three (SDRAM costs 21–33 % more), so the fast region stays in 
 
 ### Pedal (SW1 × SW3)
 
-`kWorst` (the EQ on, post, all five sections live; sound on sound on in 501 at ratio 4), `delay_mode` and `reverb_algo` set over SysEx, 12 s of log per row (`usb_log.py`), the first two status lines of each row dropped; measured 2026-11-14 (build d115a92) at 96 kHz with the input reading −16 to −21 dBFS (the cost does not depend on the signal) and every color's scope at its default, all (the BBD on the input). avg is the range of the remaining lines, max the highest. `underruns 0` on every row.
+`kWorst` (the EQ on, post, all five sections live; sound on sound on in 501 at ratio 4), `delay_mode` and `reverb_algo` set over SysEx, 12 s of log per row (`usb_log.py`), the first two status lines of each row dropped; measured 2026-11-14 (build d115a92; 2d789bf's Hall fix moves the bench's `engine * hall` rows by about 1 ‰, inside the pedal rows' spread) at 96 kHz with the input reading −16 to −21 dBFS (the cost does not depend on the signal) and every color's scope at its default, all (the BBD on the input). avg is the range of the remaining lines, max the highest. `underruns 0` on every row.
 
 |SW1|SW3|avg ‰|max ‰|
 |---|---|---|---|
