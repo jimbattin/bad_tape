@@ -37,7 +37,7 @@ export const enumIndex = (p: ParamInfo, code: number): number => Math.round(from
 /** An enum option index as its code. */
 export const enumCode = (p: ParamInfo, index: number): number => toCode(p, p.min + index);
 
-/** A parameter not on a switch or FS1: the editor can edit and save it. */
+/** A parameter not on a switch or footswitch: the editor can edit and save it. */
 export const isSaveable = (p: ParamInfo): boolean => p.control === 0;
 
 /** An enum's value names in value order (index = value − min), parsed from its unit "0 reverse, 1 off, …"; else null. */
@@ -46,7 +46,8 @@ export function enumLabels(p: ParamInfo): string[] | null {
   return p.unit.split(",").map((s) => s.trim().replace(/^-?\d+\s+/, ""));
 }
 
-function number(v: number): string {
+/** v to 2, 1 or 0 decimals by magnitude. */
+function fmtNumber(v: number): string {
   const a = Math.abs(v);
   return v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : 2);
 }
@@ -61,8 +62,8 @@ export function formatValue(p: ParamInfo, v: number): string {
     const tenths = Math.round(v * 10) / 10; // a code's float noise around 0 prints as 0.0, never +0.0 or -0.0
     return `${tenths > 0 ? "+" : ""}${(tenths === 0 ? 0 : tenths).toFixed(1)} ${p.unit.split(" ")[0]}`;
   }
-  if (p.unit === "Hz" && v >= 1000) return `${number(v / 1000)} kHz`;
-  const text = p.unit === "%" || p.unit === "ms" ? v.toFixed(Math.abs(v) >= 10 ? 0 : 1) : number(v);
+  if (p.unit === "Hz" && v >= 1000) return `${fmtNumber(v / 1000)} kHz`;
+  const text = p.unit === "%" || p.unit === "ms" ? v.toFixed(Math.abs(v) >= 10 ? 0 : 1) : fmtNumber(v);
   return p.unit ? `${text} ${p.unit}` : text;
 }
 

@@ -6,7 +6,9 @@
 //   slot's knob moves more than kPickup from where it was at the write; then the knob takes it back.
 // - FS2 (shift, btctl::ShiftFilter): while it is held a knob drives only its secondary, once the knob has moved more
 //   than kPickup from where it was at the press. A knob moved more than kPickup while FS2 was held keeps its primary
-//   until it moves more than kPickup from where it was at the release.
+//   until it moves more than kPickup from where it was at the release. Releasing FS2 toggles delay_sos (a tap) when
+//   delay_sos_mode is not off, no knob moved more than kPickup while it was held (with or without a secondary) and no
+//   toggle changed position; MIDI writes during the hold don't cancel it.
 // - A parameter on more than one slot follows the knob that moved last: a slot writing it holds the others.
 // - A newly assigned parameter keeps its value until its knob moves more than kPickup. At the first Update the
 //   primaries take their knobs' positions (a saved value of a parameter on a primary is replaced).
@@ -50,6 +52,7 @@ public:
             shiftMoved_[k] = false;
         }
         shift_ = false;
+        shiftToggled_ = false;
         started_ = false;
         for (uint8_t& t : lastToggle_) t = 0xFF;
         active_ = btctl::ToAlgo(uint8_t(value_[kReverbAlgo]));
@@ -100,6 +103,7 @@ public:
             const int id = ToggleParam(t);
             value_[id] = Clamp(kParams[id], float(toggles[t]));
             lastToggle_[t] = toggles[t];
+            if (started_ && (shift || shift_)) shiftToggled_ = true;
         }
         active_ = btctl::ToAlgo(uint8_t(value_[kReverbAlgo]));
 
@@ -129,6 +133,7 @@ public:
         started_ = true;
 
         if (shift && !shift_) {
+            shiftToggled_ = false;
             for (int k = 0; k < kKnobs; ++k) {
                 shiftAnchor_[k] = knobs[k];
                 shiftMoved_[k] = false;
@@ -136,10 +141,14 @@ public:
                 HoldSlot(kKnobs + k, knobs);
             }
         } else if (!shift && shift_) {
+            bool moved = shiftToggled_;
+            for (int k = 0; k < kKnobs; ++k) moved = moved || shiftMoved_[k];
             for (int k = 0; k < kKnobs; ++k) {
                 if (!shiftMoved_[k] || slot_[k] == kNoParam) continue;
                 HoldSlot(k, knobs);
             }
+            if (!moved && btctl::ToSosMode(uint8_t(value_[kDelaySosMode])) != btctl::SosMode::kOff)
+                value_[kDelaySos] = value_[kDelaySos] > 0.5f ? 0.0f : 1.0f;
         }
         shift_ = shift;
 
@@ -224,6 +233,7 @@ private:
     bool shift_;                // FS2 as of the last Update
     float shiftAnchor_[kKnobs]; // knob positions at the FS2 press
     bool shiftMoved_[kKnobs];   // the knob moved more than kPickup while FS2 was held
+    bool shiftToggled_;         // a toggle changed position while FS2 was held
     bool started_;
     uint8_t lastToggle_[3];
     btctl::Algo active_;

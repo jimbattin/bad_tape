@@ -16,8 +16,8 @@
 //   publish that stored a value; the callback scans gParam only when gParamGen moved (acquire), so it misses no update
 //   and skips the kParamCount-entry scan otherwise.
 // Memory (memory.h; the map is in daisy/README.md): AudioCallback and the DSP's per-sample and per-tick functions run
-// from ITCM; the engine and the callback's own state live in DTCM; the delay line and the reverb pool's slow region in
-// SDRAM, the pool's fast region in D2 SRAM. FPSCR.FZ is on (denormals flush to zero).
+// from ITCM; the engine and the callback's own state live in DTCM; the delay line, the SOS line and the reverb pool's
+// slow region in SDRAM, the pool's fast region in D2 SRAM. FPSCR.FZ is on (denormals flush to zero).
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -43,6 +43,8 @@ constexpr uint32_t kControlSettleMs = 200;  // after StartAudio: knob filters an
 constexpr float kLedFloorDb = -30.0f;  // LED2 off at or below this input level (dBFS; 1.0 = 0 dBFS)
 constexpr float kLedFullDb = -10.0f;   // LED2 fully on at or above this input level (dBFS)
 constexpr float kLedReleaseS = 0.15f;  // LED2 envelope release time constant
+constexpr uint32_t kSosBlinkBlocks = 750;  // LED2 SOS blink half-period: 250 ms at the block rate
+static_assert(kSosBlinkBlocks * btdsp::kBlockSize * 4 == size_t(btdsp::kSampleRate), "LED2 blinks at 2 Hz");
 // Per-block release factor of the LED2 envelope (about 0.9978).
 const float gLedRelease = std::exp(-float(btdsp::kBlockSize) / (kLedReleaseS * btdsp::kSampleRate));
 static_assert(btdsp::kSampleRate == 96000.0f, "the codec runs at SAI_96KHZ");
@@ -68,8 +70,10 @@ BT_DTCM btctl::ShiftFilter gShiftFilter;
 BT_DTCM float gInEnv = 0.0f;    // peak envelope of the input, linear (1.0 = 0 dBFS)
 BT_DTCM float gPeakAcc = 0.0f;  // input peak since the main loop last read gPeak
 BT_DTCM btdsp::Engine gEngine;
+BT_DTCM uint32_t gSosBlink = 0;  // blocks since SOS went on (LED2 blinks)
 BT_DTCM uint32_t gParamSeen = 0xFFFFFFFFu;  // the gParamGen of the last gParam scan
 BT_SDRAM float gDelayMem[btdsp::kDelaySamples];
+BT_SDRAM float gSosMem[btdsp::kSosSamples];
 BT_D2 float gReverbFast[btdsp::kReverbFastFloats];
 BT_SDRAM float gReverbSlow[btdsp::kReverbSlowFloats];
 
@@ -120,7 +124,10 @@ void updateControls() {
     uint8_t t[3];
     for (int i = 0; i < 3; ++i) t[i] = gToggle[i].load(std::memory_order_relaxed);
     const bool shift = gFsHeld.load(std::memory_order_relaxed) & 2;
+    const float sosBefore = gStore.Value(btparam::kDelaySos);
     const uint16_t taken = gStore.Update(k, t, shift);
+    if (gStore.Value(btparam::kDelaySos) != sosBefore)
+        btusb::Log("fs2 sos %s", gStore.Value(btparam::kDelaySos) > 0.5f ? "on" : "off");
     if (!taken) return;
     for (int s = 0; s < btparam::kSlots; ++s) {
         if (!(taken & (1u << s))) continue;
@@ -150,7 +157,7 @@ BT_ITCM void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffe
     gLoad.OnBlockStart();
     const uint32_t start = System::GetTick();
     hw.Process();
-    // FS1 counts toward bypass; FS2 is the knobs' shift (ShiftFilter, param_store.h).
+    // FS1 counts toward bypass; FS2 is the knobs' shift and the SOS tap (ShiftFilter, param_store.h).
     if (hw.FootswitchRising(0)) gFs1Presses.fetch_add(1, std::memory_order_relaxed);
 
     for (int k = 0; k < 6; ++k) gKnob[k].store(hw.Knob(k), std::memory_order_relaxed);
@@ -180,12 +187,19 @@ BT_ITCM void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffe
 
     gLed1.Set(gEngine.Param(btparam::kBypass) > 0.5f ? 0.0f : 1.0f);
     gLed1.Update();
-    // LED2: the input's peak envelope, duty linear in dB from kLedFloorDb (off) to kLedFullDb (full); the cbrt
-    // cancels Led::Set's cube.
+    // LED2: while SOS is on (delay_sos with a mode), a 2 Hz blink, lit from the switch-on; otherwise the input's peak
+    // envelope, duty linear in dB from kLedFloorDb (off) to kLedFullDb (full); the cbrt cancels Led::Set's cube.
     gInEnv = std::fmax(peak, gInEnv * gLedRelease);  // instant attack, kLedReleaseS release
-    const float db = 20.0f * std::log10(std::fmax(gInEnv, 1e-6f));
-    const float level = std::fmin(std::fmax((db - kLedFloorDb) / (kLedFullDb - kLedFloorDb), 0.0f), 1.0f);
-    gLed2.Set(std::cbrt(level));
+    const bool sos = gEngine.Param(btparam::kDelaySos) > 0.5f && gEngine.Param(btparam::kDelaySosMode) > 0.5f;
+    if (sos) {
+        gLed2.Set((gSosBlink / kSosBlinkBlocks) % 2 == 0 ? 1.0f : 0.0f);
+        ++gSosBlink;
+    } else {
+        gSosBlink = 0;
+        const float db = 20.0f * std::log10(std::fmax(gInEnv, 1e-6f));
+        const float level = std::fmin(std::fmax((db - kLedFloorDb) / (kLedFullDb - kLedFloorDb), 0.0f), 1.0f);
+        gLed2.Set(std::cbrt(level));
+    }
     for (size_t i = 0; i < size; i += 8) gLed2.Update();
 
     if (System::GetTick() - start > gBlockTicks) gUnderruns.fetch_add(1, std::memory_order_relaxed);
@@ -218,12 +232,14 @@ void logStatus() {
     gLoadReset.store(true, std::memory_order_relaxed);
     const int db = peak > 0.0f ? std::max(int(lroundf(20.0f * log10f(peak))), -120) : -120;
     const auto pos = [](uint8_t id) { return uint8_t(gStore.Value(id)); };
-    btusb::Log("load avg %d max %d permille underruns %lu bypass %s delay %s route %s algo %s in %d dBFS",
+    btusb::Log("load avg %d max %d permille underruns %lu bypass %s delay %s route %s algo %s in %d dBFS sos %s %s",
                int(avg * 1000), int(max * 1000), (unsigned long)gUnderruns.load(std::memory_order_relaxed),
                gStore.Value(btparam::kBypass) > 0.5f ? "on" : "off",
                btctl::Name(btctl::ToDelayMode(pos(btparam::kDelayMode))),
                btctl::Name(btctl::ToRouting(pos(btparam::kRouting))),
-               btctl::Name(btctl::ToAlgo(pos(btparam::kReverbAlgo))), db);
+               btctl::Name(btctl::ToAlgo(pos(btparam::kReverbAlgo))), db,
+               btctl::Name(btctl::ToSosMode(pos(btparam::kDelaySosMode))),
+               gStore.Value(btparam::kDelaySos) > 0.5f ? "on" : "off");
 }
 
 }  // namespace
@@ -240,7 +256,7 @@ int main() {
     bthost::Init(gStore, hw.seed.qspi, readKnobs, logBoot);
     bthost::LoadSaved();
     publishParams();
-    gEngine.Init(btdsp::kSampleRate, gDelayMem,
+    gEngine.Init(btdsp::kSampleRate, gDelayMem, btdsp::SosLine{gSosMem, btdsp::kSosSamples},
                  btdsp::ReverbPool{gReverbFast, gReverbSlow});  // after hw.Init (SDRAM is up), before StartAudio
 
     for (int i = 0; i < 3; ++i) {

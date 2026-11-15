@@ -219,7 +219,7 @@ public:
 private:
     using Params = AlgoParams<btparam::kPlateMidDecay, btparam::kPlateStopDelay>;
     static constexpr uint8_t kFirst = Params::kFirst;
-    static constexpr int kQuietMax = 1 << 30;
+    static constexpr int kQuietMax = 1 << 30;  // quiet_'s cap: no int overflow in long silence
 
     BT_ITCM Line& Ln(int k) { return unit_[k].line; }
     static BT_ITCM float Len(int k, float s) { return float(kPlateLen[k]) * s; }
@@ -276,7 +276,6 @@ private:
     // The coefficients from the smoothed values and the current SIZE.
     BT_ITCM void Update() {
         using namespace btparam;
-        constexpr float kLn1000 = 6.9077553f;
         const float s = size_.Value();
         const float rateMid = p_.Smoothed(kPlateMidDecay), rateLf = p_.Smoothed(kPlateLfDecay);  // 1 / RT
         for (int k = 0; k < 5; ++k) {

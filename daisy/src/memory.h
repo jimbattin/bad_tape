@@ -4,8 +4,8 @@
 //   own input section (.itcm_text.N): GCC rejects a named section that holds both inline (COMDAT) functions, such as
 //   the DSP's header functions, and ordinary ones, such as AudioCallback, in one translation unit. GCC 13 drops the
 //   section attribute from template instantiations (function templates and class-template members): a BT_ITCM
-//   template runs from ITCM only when inlined into its caller, so the hot ones are [[gnu::always_inline]] (SvfT,
-//   DbToGain, StepSmoothers, AlgoParams::Tick, ReverseGrains::Process); `arm-none-eabi-nm` on the image shows what
+//   template runs from ITCM only when inlined into its caller, so the hot ones are [[gnu::always_inline]] (DbToGain,
+//   StepSmoothers, AlgoParams::Tick, ReverseGrains::Process); `arm-none-eabi-nm` on the image shows what
 //   landed where.
 //   BT_DTCM: a variable in DTCM (zero-wait data, not cached). Any initialiser works.
 //   BT_SDRAM: a variable in the external SDRAM (.sdram_bss). NOLOAD: startup neither initialises nor zeroes it, so

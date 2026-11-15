@@ -15,7 +15,8 @@
 // input take it; tape wow and flutter and the BBD clock LFO stay on the repeats. Tape and BBD glide the pitch on
 // a time change; digital crossfades. delay_mode reverse plays every repeat backwards in windows as long as the delay
 // time; forward and reverse crossfade at a switch. delay_mode off stops recording new input while the repeats ring out
-// in the last direction (the reverb keeps its input).
+// in the last direction (the reverb keeps its input). Sound on sound (delay_sos_mode, delay_sos) adds one more head on
+// a long second line (delay.h) into the delay's wet.
 //
 // Mixes: the delay mixed by delay_mix, then the reverb SW3 selects (reverb_algo: plate.h, hall.h or canyon.h) mixed by
 // reverb_mix. Both are equal-power: sqrt(1 - t) dry + sqrt(t) wet, t = delay_mix for knob 1 and t = reverb_mix ^
@@ -67,12 +68,13 @@ public:
     static constexpr int kAlgoClearSamples =
         int((kReverbPoolFloats + kPoolClearPerSample - 1) / kPoolClearPerSample);
 
-    // Every parameter at its table default. delayMem: btdsp::kDelaySamples floats; reverbMem: the reverb pool
-    // (reverb_pool.h); both owned by the caller. The reverbs run at sampleRate / 2.
-    void Init(float sampleRate, float* delayMem, const ReverbPool& reverbMem) {
+    // Every parameter at its table default. delayMem: btdsp::kDelaySamples floats; sosMem: the sound-on-sound line
+    // (btdsp::kSosSamples on the Seed); reverbMem: the reverb pool (reverb_pool.h); all owned by the caller. The
+    // reverbs run at sampleRate / 2.
+    void Init(float sampleRate, float* delayMem, SosLine sosMem, const ReverbPool& reverbMem) {
         fs_ = sampleRate;
         for (const btparam::ParamDef& d : btparam::kParams) param_[d.id] = d.def;
-        delay_.Init(sampleRate, delayMem);
+        delay_.Init(sampleRate, delayMem, sosMem);
         plate_.Init(sampleRate * 0.5f, reverbMem);
         hall_.Init(sampleRate * 0.5f, reverbMem);
         canyon_.Init(sampleRate * 0.5f, reverbMem);
@@ -208,6 +210,12 @@ private:
         dt.bbdMod.depth = param_[kDelayBbdModDepth] / 100.0f;
         dt.inputOn = !bypass && mode != btctl::DelayMode::kOff;
         dt.reverse = reverse_;
+        dt.sosMode = btctl::ToSosMode(uint8_t(param_[kDelaySosMode]));
+        dt.sosOn = param_[kDelaySos] > 0.5f;
+        dt.sosLengthS = param_[kDelaySosLength];
+        dt.sosRatio = param_[kDelaySosRatio];
+        dt.sosFeedback = param_[kDelaySosFeedback] / 100.0f;
+        dt.sosLevel = param_[kDelaySosLevel] / 100.0f;
         delay_.SetTargets(dt);
         delayMix_.SetTarget(param_[kDelayMix] / 100.0f);
         reverbMix_.SetTarget(std::pow(param_[kReverbMix] / 100.0f, kReverbMixExp));

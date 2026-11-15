@@ -9,13 +9,13 @@
 // Log lines (usb_log.py; daisy/README.md "Latency"):
 //   at power-on and on HELLO "bad_tape_latency <board> seed <version> <build id>";
 //   per trial "lat SR B t T peak P.PP smp U us onset O smp amp A noise N" (A, N: 1/10000 full scale, signed A);
+//   per trial with nothing above 4 x the noise "lat SR B t T no click (peak P noise N)";
 //   per configuration "lat SR B peak min P.PP max Q.QQ smp U..V us"; then "lat pass N done seed <version>".
 // Passes repeat forever, 2 s apart. The link's DFU message restarts into the bootloader (checked between trials).
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 
 #include "board.h"
 #include "firmware.h"
@@ -103,7 +103,7 @@ long trial(uint32_t hz, size_t block, int t) {
     float noise = 0.0f;
     for (size_t k = 0; k < kPre; ++k) noise = std::fmax(noise, std::fabs(float(gCap[k] - dc)));
     size_t p = kPre;
-    for (size_t k = kPre; k < kCapture; ++k)
+    for (size_t k = kPre; k < kCapture - 1; ++k)  // the parabola reads gCap[p + 1]
         if (std::fabs(gCap[k] - dc) > std::fabs(gCap[p] - dc)) p = k;
     const float peak = float(gCap[p] - dc);
     if (std::fabs(peak) <= 4.0f * noise) {

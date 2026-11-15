@@ -25,9 +25,10 @@ constexpr float kMaxCutoff = 0.45f;   // filter cutoffs are capped at this fract
 constexpr float kUniformPeakPerRms = 1.7320508f;  // sqrt(3): uniform noise in +-1 has RMS 1/sqrt(3)
 constexpr float kButterworth2K = 1.41421356f;     // k = 1/Q of a 2-pole Butterworth
 constexpr float kButterworth4K[2] = {1.84775907f, 0.76536686f};  // k = 1/Q of a 4-pole Butterworth's two sections
+constexpr float kLn1000 = 6.9077553f;  // ln 1000: an RT60 decays by 1000 (60 dB)
 
-// Glide laws (Glide: the delay's read head, the reverbs' size, predelay, spread and echo delays): the rate chases
-// (target - x) / (time x fs), with inertia.
+// Glide laws (Glide: the delay's read heads, the reverbs' size, predelay, spread and echo delays, and the Canyon's line
+// bases): the rate chases (target - x) / (time x fs), with inertia.
 constexpr float kGlideS = 0.15f;         // the time a delay-time change glides over
 constexpr float kGlideInertiaS = 0.02f;  // inertia of the read speed (no kink at a change)
 constexpr float kGlideMaxRate = 0.25f;   // reverb predelay/spread/echo |dDelay/dn| limit, read speed 0.75..1.25
@@ -50,11 +51,10 @@ inline float TimeCoef(float seconds, float rateHz) { return 1.0f - std::exp(-1.0
 // 0 -> 0, 1 -> 1, zero slope at both ends.
 BT_ITCM inline float SmoothStep(float x) { return x * x * (3.0f - 2.0f * x); }
 
-// Underflow guard for recirculating state: magnitudes below the threshold (float 1e-15, about -300 dBFS; double 1e-30)
-// become exact 0, so tails end in true silence and host builds (no FZ) never run on denormals. FPSCR.FZ on the Seed
-// only covers denormals.
+// Underflow guard for recirculating state: magnitudes below the threshold (1e-15, about -300 dBFS) become exact 0, so
+// tails end in true silence and host builds (no FZ) never run on denormals. FPSCR.FZ on the Seed only covers
+// denormals.
 BT_ITCM inline float Flush(float v) { return std::fabs(v) < 1e-15f ? 0.0f : v; }
-BT_ITCM inline double Flush(double v) { return std::fabs(v) < 1e-30 ? 0.0 : v; }
 
 // The linear gain of db decibels (always_inline: a template's out-of-line copy loses BT_ITCM, ../memory.h).
 template <class T> [[gnu::always_inline]] inline T DbToGain(T db) { return std::pow(T(10), db / T(20)); }
@@ -66,40 +66,39 @@ BT_ITCM inline float SoftClip(float x) {
     return x * (27.0f + x * x) / (27.0f + 9.0f * x * x);
 }
 
-// Simper TPT state-variable lowpass (one 2-pole section), in float or double. Its members are always_inline: a
-// template's out-of-line copy loses BT_ITCM (../memory.h).
-template <class T> struct SvfT {
-    T a1 = T(0), a2 = T(0), a3 = T(0), ic1 = T(0), ic2 = T(0);
+// Simper TPT state-variable lowpass (one 2-pole section). Its members are always_inline: they run per sample inside
+// BT_ITCM callers.
+struct Svf {
+    float a1 = 0.0f, a2 = 0.0f, a3 = 0.0f, ic1 = 0.0f, ic2 = 0.0f;
     // f: cutoff as a fraction of fs (< 0.5); k: 1/Q.
-    [[gnu::always_inline]] inline void Set(T f, T k) { SetG(std::tan(kPiT<T> * f), k); }
+    [[gnu::always_inline]] inline void Set(float f, float k) { SetG(std::tan(kPi * f), k); }
     // g = tan(pi f), precomputed.
-    [[gnu::always_inline]] inline void SetG(T g, T k) {
-        a1 = T(1) / (T(1) + g * (g + k));
+    [[gnu::always_inline]] inline void SetG(float g, float k) {
+        a1 = 1.0f / (1.0f + g * (g + k));
         a2 = g * a1;
         a3 = g * a2;
     }
     // band: the bandpass output (unity gain at the cutoff when k = 1).
-    [[gnu::always_inline]] inline T Process(T v, T& band) {
-        const T v3 = v - ic2;
-        const T v1 = a1 * ic1 + a2 * v3;
-        const T v2 = ic2 + a2 * ic1 + a3 * v3;
-        ic1 = Flush(T(2) * v1 - ic1);
-        ic2 = Flush(T(2) * v2 - ic2);
+    [[gnu::always_inline]] inline float Process(float v, float& band) {
+        const float v3 = v - ic2;
+        const float v1 = a1 * ic1 + a2 * v3;
+        const float v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = Flush(2.0f * v1 - ic1);
+        ic2 = Flush(2.0f * v2 - ic2);
         band = v1;
         return v2;
     }
-    [[gnu::always_inline]] inline T Process(T v) {
-        T b;
+    [[gnu::always_inline]] inline float Process(float v) {
+        float b;
         return Process(v, b);
     }
-    void Clear() { ic1 = ic2 = T(0); }
+    void Clear() { ic1 = ic2 = 0.0f; }
     // The lowpass's steady state at a constant input v (a filter starting warm on a running signal).
-    [[gnu::always_inline]] inline void Warm(T v) {
-        ic1 = T(0);
+    [[gnu::always_inline]] inline void Warm(float v) {
+        ic1 = 0.0f;
         ic2 = v;
     }
 };
-using Svf = SvfT<float>;
 
 // 4-pole Butterworth lowpass: two Svf sections.
 struct Butterworth4 {
@@ -109,7 +108,8 @@ struct Butterworth4 {
         s[0].Set(f, kButterworth4K[0]);
         s[1].Set(f, kButterworth4K[1]);
     }
-    BT_ITCM float Process(float v) { return s[1].Process(s[0].Process(v)); }
+    // always_inline: GCC's inlining of it into the BBD and crush paths flips with unrelated code changes.
+    [[gnu::always_inline]] inline float Process(float v) { return s[1].Process(s[0].Process(v)); }
     void Clear() {
         s[0].Clear();
         s[1].Clear();
@@ -191,6 +191,8 @@ struct Crossfade {
         on = true;
     }
     BT_ITCM float Weight() const { return SmoothStep(float(pos) / float(len)); }
+    // from crossfaded toward to by Weight().
+    BT_ITCM float Mix(float from, float to) const { return from + Weight() * (to - from); }
     BT_ITCM bool Advance() {
         if (++pos < len) return false;
         on = false;

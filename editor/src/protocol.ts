@@ -37,7 +37,7 @@ export type Taper = 0 | 1 | 2 | 3;
 export interface ParamInfo {
   id: number;
   taper: Taper;
-  /** 0 none, 1-3 SW1-SW3, 4 FS1. */
+  /** 0 none, 1-3 SW1-SW3, 4 FS1, 5 FS2. */
   control: number;
   group: number;
   /** The factory default's code. */

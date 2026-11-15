@@ -12,7 +12,7 @@ import { readEqSettings } from "./eqModel";
 import { assignGroups, assignLabel, assignValue, primaryIn, SLOTS, slotName, slotParams } from "./knobs";
 import { ALGO_TABS, type RowDef, type SectionDef, TABS, type TabId, unplacedRows } from "./layout";
 import { clear, GROUP, type ParamInfo, save, set } from "./protocol";
-import { effectiveSaved, isEdited, shownCode, shownValue } from "./state";
+import { effectiveSaved, isEdited, shownAlgo, shownCode, shownValue } from "./state";
 import { usePedal } from "./usePedal";
 import { isSaveable, toCode } from "./values";
 
@@ -75,7 +75,7 @@ export function App() {
   const recallMany = (targets: { id: number; code: number }[]) => {
     const t = Date.now();
     for (const x of targets) dispatch({ type: "local", id: x.id, code: x.code, now: t });
-    link.sendPaced(targets.map((x) => set(x.id, x.code)));
+    link.sendPaced(targets.map((x) => ({ key: `p${x.id}`, bytes: set(x.id, x.code) })));
   };
 
   const onSaveAll = () =>
@@ -112,7 +112,7 @@ export function App() {
     const slotProps =
       info.group === GROUP.knobs
         ? {
-            control: (
+            widget: (
               <AssignSelect
                 label={`${sectionTitle} ${c.label}`}
                 groups={groups}
@@ -158,7 +158,7 @@ export function App() {
     if (info) onEdit(info.id, toCode(info, v));
   };
 
-  const algo = Math.round(shownValue(s, "reverb_algo", now) ?? -1);
+  const algo = shownAlgo(s, now);
   /** A tab's lamp: its section is in use on the pedal; undefined: no lamp. */
   const tabLit = (id: TabId): boolean | undefined => {
     if (!s.dumped) return undefined;
@@ -173,7 +173,7 @@ export function App() {
       case "plate":
       case "hall":
       case "canyon":
-        return ALGO_TABS[algo] === id;
+        return algo !== undefined && ALGO_TABS[algo] === id;
     }
   };
   const tabs: NavTab<TabId>[] = TABS.map((t) => ({ id: t.id, label: t.label, lit: tabLit(t.id) }));

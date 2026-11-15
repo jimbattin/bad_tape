@@ -147,7 +147,8 @@ void handleHost(const uint8_t* m, size_t n) {
     } else if (cmd == btlink::kSave || cmd == btlink::kClear) {
         uint8_t ids[btparam::kSaveableCount];
         const size_t bytes = n - 6;  // PedalCommand: n >= 6
-        const size_t count = bytes / 2 <= size_t(btparam::kSaveableCount) ? btlink::DecodeIds(m + 5, bytes, ids) : 0;
+        // gHostIn holds at most 6 + 2 * kSaveableCount bytes, so ids fits.
+        const size_t count = btlink::DecodeIds(m + 5, bytes, ids);
         handleSave(cmd == btlink::kSave, ids, count);
     } else if (cmd == btlink::kSavedQuery && n == 6) {
         for (uint8_t id = 0; id < kParamCount; ++id) gSendSaved[id] = btparam::IsSaveable(id);

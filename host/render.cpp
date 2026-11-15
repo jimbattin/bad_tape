@@ -100,10 +100,11 @@ int main(int argc, char** argv) {
     }
     x.resize(x.size() + size_t(std::lround(tail * kRate)), 0.0f);
 
-    std::vector<float> delayMem(btdsp::kDelaySamples);
+    std::vector<float> delayMem(btdsp::kDelaySamples), sosMem(btdsp::kSosSamples);
     std::vector<float> reverbFast(btdsp::kReverbFastFloats), reverbSlow(btdsp::kReverbSlowFloats);
     btdsp::Engine engine;
-    engine.Init(btdsp::kSampleRate, delayMem.data(), btdsp::ReverbPool{reverbFast.data(), reverbSlow.data()});
+    engine.Init(btdsp::kSampleRate, delayMem.data(), btdsp::SosLine{sosMem.data(), sosMem.size()},
+                btdsp::ReverbPool{reverbFast.data(), reverbSlow.data()});
     btparam::Store store;
     store.Init();
     const float knobs[6] = {};  // no knobs: nothing a --set holds is ever taken back

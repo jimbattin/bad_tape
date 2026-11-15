@@ -21,6 +21,17 @@
 // Reverse (ReverseGrains): the heard wet crossfades between the forward and reverse reads over kXfadeMs (smoothstep);
 // forward skips the grains entirely. The caller decides the direction (the engine keeps the last one while SW1 is
 // off).
+// Sound on sound (delay_sos_mode, delay_sos): a second line (SosLine, caller-provided; 44 MiB of SDRAM on the Seed)
+// records what the loop writes, every sample in every mode, and one more head reads it into the wet, through the
+// same output-only colors as the repeats (bit inversion, tape bump and hiss). delay_sos fades the head in and out
+// over kXfadeMs. 301: the head is delay_sos_length back and plays once. 501: the head is at delay_sos_ratio x the
+// delay time, wobbles and glides like the main head, and feeds back into the loop at the delay feedback. Overdub: the
+// head is delay_sos_length back and the line writes what the loop writes plus delay_sos_feedback x what the head
+// plays (soft limited), so switching on loops the last delay_sos_length and keeps layering. A length, ratio or mode
+// change crossfades the head (a 501 time change on tape or BBD glides it). Reverse reverses the main head only; SW1
+// off and bypass stop the input, and the SOS head keeps playing. With SOS off and faded out the output is
+// bit-identical to a delay without it. Live, the head runs out of line (ProcessSos); its ramps, smoothers and 501
+// glide step on the control tick (SosTick), its gains ramp linearly across each tick.
 // Every update counts samples (per sample, or every kControlInterval samples), so the output does not depend on how the
 // caller splits its blocks. No libDaisy, no allocation.
 #pragma once
@@ -60,6 +71,24 @@ static_assert(2.0f * (btparam::kParams[btparam::kDelayTapeWow].max + btparam::kP
                           kSampleRate / 1000.0f + 3.0f <= float(kTapeInputLine),
               "the wow line holds the deepest wobble");
 
+// The sound-on-sound line (Delay::Init's SosLine on the Seed): 11 x 2^20 floats (44 MiB, 120.15 s at 96 kHz).
+constexpr size_t kSosSamples = size_t(11) << 20;
+static_assert(btparam::kParams[btparam::kDelaySosLength].max * kSampleRate + 3.0f <= float(kSosSamples),
+              "the SOS line holds the longest length");
+// Caller-owned memory for the SOS line: any length >= 8 samples; lengths and heads clamp to it.
+struct SosLine {
+    float* mem;
+    size_t samples;
+};
+
+// 4-point Hermite through x0..x3 (x1 at f = 0, x2 at f = 1; x0 is the newer neighbour).
+BT_ITCM inline float Hermite(float x0, float x1, float x2, float x3, float f) {
+    const float c1 = 0.5f * (x2 - x0);
+    const float c2 = x0 - 2.5f * x1 + 2.0f * x2 - 0.5f * x3;
+    const float c3 = 0.5f * (x3 - x0) + 1.5f * (x1 - x2);
+    return ((c3 * f + c2) * f + c1) * f + x1;
+}
+
 // Unity up to kLimitKnee, C1 at the knee, approaching 1.0, which it reaches at kLimitKnee + 3 (1 - kLimitKnee) = 2.0.
 BT_ITCM inline float SoftLimit(float v) {
     const float a = std::fabs(v);
@@ -81,8 +110,8 @@ struct DcBlocker {
     }
 };
 
-// Everything the delay takes once per engine block. crush.amount, tape.age, tape.colorShare and bbd.amount are
-// ignored: SetTargets and the scopes derive them.
+// Everything the delay takes once per engine block. crush.amount, crush.delayS, tape.age, tape.colorShare and
+// bbd.amount are ignored: SetTargets and the scopes derive them.
 struct DelayTargets {
     float timeMs = 350.0f, feedback = 0.35f;  // ms; gain 0..1.1
     btctl::DelayType type = btctl::DelayType::kTape;
@@ -94,6 +123,11 @@ struct DelayTargets {
     BbdSettings bbd;
     BbdModSettings bbdMod;
     bool inputOn = true, reverse = false;
+    // Sound on sound: delay_sos_mode, delay_sos, delay_sos_length (s), delay_sos_ratio (x the delay time),
+    // delay_sos_feedback and delay_sos_level (0..1).
+    btctl::SosMode sosMode = btctl::SosMode::kOff;
+    bool sosOn = false;
+    float sosLengthS = 15.0f, sosRatio = 2.5f, sosFeedback = 0.9f, sosLevel = 1.0f;
 };
 
 // A settings field and the parameter whose smoothMs it smooths with.
@@ -223,12 +257,23 @@ private:
 
 class Delay {
 public:
-    // mem: kDelaySamples floats, cleared here (the SDRAM section is NOLOAD).
-    void Init(float sampleRate, float* mem) {
+    // mem: kDelaySamples floats; sos: the SOS line. Both cleared here (the SDRAM sections are NOLOAD).
+    void Init(float sampleRate, float* mem, SosLine sos) {
         fs_ = sampleRate;
         mem_ = mem;
         std::memset(mem_, 0, kDelaySamples * sizeof(float));
         wpos_ = 0;
+        sos_ = sos.mem;
+        sosN_ = sos.samples;
+        sosMax_ = float(sosN_ - 3);
+        std::memset(sos_, 0, sosN_ * sizeof(float));
+        sosW_ = 0;
+        sosMode_ = btctl::SosMode::kOff;
+        sosOnT_ = m501T_ = mOdT_ = 0.0f;
+        sosLevelT_ = 1.0f;
+        sosFbT_ = 0.9f;
+        sosTargetD_ = 2.0f;
+        sosGlides_ = false;
         dc_.Init(fs_);
         crush_.Init(fs_);
         crushIn_.Init(fs_);
@@ -242,6 +287,7 @@ public:
         fadeLen_ = int(std::lround(kXfadeMs * fs_ / 1000.0f));
         grains_.Init(fadeLen_);
         gc_.Init(fs_);
+        sosGc_.Init(fs_ / kControlInterval);
         ctl_ = 1;
         targetD_ = 2.0f;
         fbT_ = inT_ = 0.0f;
@@ -278,6 +324,25 @@ public:
         bbdModT_ = t.bbdMod;
         inT_ = t.inputOn ? 1.0f : 0.0f;
         revT_ = t.reverse ? 1.0f : 0.0f;
+        // SOS: mode off fades the head out with the old mode's behaviour (sosMode_ and the weights stay).
+        const bool armed = t.sosMode != btctl::SosMode::kOff;
+        sosOnT_ = armed && t.sosOn ? 1.0f : 0.0f;
+        if (armed) {
+            if (t.sosMode != sosMode_) {
+                sosJump_ = true;
+                sosMode_ = t.sosMode;
+            }
+            m501T_ = sosMode_ == btctl::SosMode::k501 ? 1.0f : 0.0f;
+            mOdT_ = sosMode_ == btctl::SosMode::kOverdub ? 1.0f : 0.0f;
+        }
+        sosTargetD_ = sosMode_ == btctl::SosMode::k501
+                          ? std::clamp(t.sosRatio * targetD_, 2.0f, sosMax_)
+                          : std::clamp(float(std::lround(t.sosLengthS * fs_)), 2.0f, sosMax_);
+        sosGlides_ = glideT_ && sosMode_ == btctl::SosMode::k501;
+        sosLevelT_ = t.sosLevel;
+        sosFbT_ = t.sosFeedback;
+        if (!sosLive_) SnapSosHeads();  // idle: nothing has moved them since
+        sosLive_ = sosLive_ || sosOnT_ > 0.0f;
     }
 
     // Jumps every smoothed value to its target.
@@ -313,6 +378,17 @@ public:
         in_.Init(fs_, kEnableRampS, inT_);
         rev_.Init(fs_, kXfadeMs * 1e-3f, revT_);
         grains_.Reset();
+        SnapSosHeads();
+        sosOn_.Init(ctlRate, kXfadeMs * 1e-3f, sosOnT_);
+        m501_.Init(ctlRate, kXfadeMs * 1e-3f, m501T_);
+        mOd_.Init(ctlRate, kXfadeMs * 1e-3f, mOdT_);
+        sosLevel_.Init(ctlRate, btparam::SmoothSeconds(btparam::kDelaySosLevel), sosLevelT_);
+        sosFb_.Init(ctlRate, btparam::SmoothSeconds(btparam::kDelaySosFeedback), sosFbT_);
+        SetSosGains();
+        sosOut_.Snap();
+        sosFbIn_.Snap();
+        sosKeep_.Snap();
+        sosLive_ = sosOnT_ > 0.0f;
     }
 
     // One sample in, the wet (read) sample out.
@@ -356,7 +432,7 @@ public:
         const auto pos = [&](float h) { return moved ? std::clamp(h + off, 2.0f, float(kDelaySamples - 3)) : h; };
         float wF = Read(pos(head_[active_]));
         if (fade_.on) {
-            wF += fade_.Weight() * (Read(pos(head_[active_ ^ 1])) - wF);
+            wF = fade_.Mix(wF, Read(pos(head_[active_ ^ 1])));
             if (fade_.Advance()) {
                 active_ ^= 1;
                 glide_.Snap(head_[active_]);
@@ -371,11 +447,10 @@ public:
             w = wF + SmoothStep(r) * (wR - wF);
             if (r == 0.0f && revT_ == 0.0f) grains_.Reset();
         }
-        float v = crush_.Process(dc_.Process(tape_.Record(g * x + fb * wF)));
-        const float on = bbdOn_.Process(bbdOnT_) * (1.0f - bsc);
-        v = SoftLimit(ThroughBbd(bbd_, bbdLive_, on, v));
-        mem_[wpos_] = v;
-        wpos_ = (wpos_ + 1) & kDelayMask;
+        // SOS: idle, the loop is exactly the delay's own (a branch, not a zero gain, so the output stays bit-identical)
+        // and the line just records; live, out of line (inlined, its registers cost the idle path ~25 ‰ on the bench).
+        if (sosLive_) return ProcessSos(g * x, fb, wF, w, bsc, moved, off);
+        StoreSos(WriteLoop(g * x + fb * wF, bsc));
         return tape_.Playback(crush_.InvertBits(w));
     }
 
@@ -431,6 +506,104 @@ private:
         return v;
     }
 
+    // The loop from its input in: tape record, DC blocker, crush, BBD, soft limiter, written to the line; returns the
+    // written sample. always_inline: the idle path stays the delay's own.
+    [[gnu::always_inline]] inline float WriteLoop(float in, float bsc) {
+        float v = crush_.Process(dc_.Process(tape_.Record(in)));
+        const float on = bbdOn_.Process(bbdOnT_) * (1.0f - bsc);
+        v = SoftLimit(ThroughBbd(bbd_, bbdLive_, on, v));
+        mem_[wpos_] = v;
+        wpos_ = (wpos_ + 1) & kDelayMask;
+        return v;
+    }
+
+    // Writes v at the SOS line's write slot and advances it. always_inline: the idle path stays the delay's own.
+    [[gnu::always_inline]] inline void StoreSos(float v) {
+        sos_[sosW_] = v;
+        sosW_ = sosW_ + 1 == sosN_ ? 0 : sosW_ + 1;
+    }
+
+    // The rest of Process while SOS is live: gx the loop's input (g x), fb the feedback, wF the main forward read, w
+    // the main wet, bsc the BBD scope, moved and off the main head's wobble (tape wow and flutter, the BBD clock LFO),
+    // applied to a 501 head. Returns the wet. Per sample only the head, its read and three linear gain steps; the rest
+    // is SosTick's, on Process's control ticks.
+    [[gnu::noinline]] BT_ITCM float ProcessSos(float gx, float fb, float wF, float w, float bsc, bool moved,
+                                               float off) {
+        if (ctl_ == kControlInterval) SosTick();  // Process ticked this sample
+        const float gOut = sosOut_.Step(), gFb = sosFbIn_.Step(), gKeep = sosKeep_.Step();
+        sosHead_[sosActive_] += sosStep_;
+        const auto sp = [&](int k) {
+            return sosWob_[k] && moved ? std::clamp(sosHead_[k] + off, 2.0f, sosMax_) : sosHead_[k];
+        };
+        float s = ReadSos(sp(sosActive_));
+        if (sosFade_.on) {
+            s = sosFade_.Mix(s, ReadSos(sp(sosActive_ ^ 1)));
+            if (sosFade_.Advance()) {
+                sosActive_ ^= 1;
+                sosGlide_.Snap(sosHead_[sosActive_]);
+                sosStep_ = 0.0f;
+            }
+        }
+        const float v = WriteLoop(gx + fb * (wF + gFb * s), bsc);  // 501: the head feeds the loop
+        StoreSos(gKeep > 0.0f ? SoftLimit(v + gKeep * s) : v);  // overdub: the line keeps its loop
+        return tape_.Playback(crush_.InvertBits(w + gOut * s));
+    }
+
+    // Once per control tick while live: the on/off, mode and level ramps, the gains' next targets (reached linearly over
+    // the tick), and the head: a 501 glide step on tape or BBD (spread over the tick's samples), or a crossfade to its
+    // target (a mode change always crossfades). Faded out, it ends the live state (the gains are exactly 0).
+    [[gnu::noinline]] BT_ITCM void SosTick() {
+        sosOut_.Snap();
+        sosFbIn_.Snap();
+        sosKeep_.Snap();
+        if (sosOnT_ == 0.0f && sosOn_.Value() == 0.0f) {
+            sosLive_ = false;
+            sosStep_ = 0.0f;
+            return;
+        }
+        sosOn_.Process(sosOnT_);
+        m501_.Process(m501T_);
+        mOd_.Process(mOdT_);
+        sosLevel_.Process(sosLevelT_);
+        sosFb_.Process(sosFbT_);
+        SetSosGains();
+        sosStep_ = 0.0f;
+        if (sosFade_.on) return;
+        if (sosJump_ || !sosGlides_) {
+            if (sosTargetD_ != sosHead_[sosActive_]) {
+                const int o = sosActive_ ^ 1;
+                sosHead_[o] = sosTargetD_;
+                sosWob_[o] = sosMode_ == btctl::SosMode::k501;
+                sosFade_.Start(fadeLen_);
+            }
+            sosJump_ = false;
+        } else {
+            const float next = sosGlide_.Process(sosTargetD_, sosGc_.a, sosGc_.b,
+                                                 kTapeGlideMaxRate * float(kControlInterval), 1e-3f);
+            sosStep_ = (next - sosHead_[sosActive_]) * (1.0f / float(kControlInterval));
+        }
+    }
+
+    // The SOS gains' targets from the ramps and smoothers: the wet (on x level), the 501 feedback (on x 501) and the
+    // overdub's keep (on x overdub x delay_sos_feedback).
+    BT_ITCM void SetSosGains() {
+        const float on = SmoothStep(sosOn_.Value());
+        sosOut_.Set(on * sosLevel_.Value());
+        sosFbIn_.Set(on * m501_.Value());
+        sosKeep_.Set(on * mOd_.Value() * sosFb_.Value());
+    }
+
+    // Both SOS heads at their target, no fade, no glide.
+    BT_ITCM void SnapSosHeads() {
+        sosHead_[0] = sosHead_[1] = sosTargetD_;
+        sosActive_ = 0;
+        sosFade_ = Crossfade{};
+        sosGlide_.Snap(sosTargetD_);
+        sosStep_ = 0.0f;
+        sosWob_[0] = sosWob_[1] = sosMode_ == btctl::SosMode::k501;
+        sosJump_ = false;
+    }
+
     // d samples behind the slot about to be written, d >= 2 (so the read never touches that slot).
     BT_ITCM float Read(float d) const {
         const size_t di = size_t(d);
@@ -439,10 +612,19 @@ private:
         const float x1 = mem_[(wpos_ - di) & kDelayMask];
         const float x2 = mem_[(wpos_ - (di + 1)) & kDelayMask];
         const float x3 = mem_[(wpos_ - (di + 2)) & kDelayMask];
-        const float c1 = 0.5f * (x2 - x0);
-        const float c2 = x0 - 2.5f * x1 + 2.0f * x2 - 0.5f * x3;
-        const float c3 = 0.5f * (x3 - x0) + 1.5f * (x1 - x2);
-        return ((c3 * f + c2) * f + c1) * f + x1;
+        return Hermite(x0, x1, x2, x3, f);
+    }
+
+    // The SOS line d samples behind the slot about to be written, 2 <= d <= sosN_ - 3; exactly a sample at whole d.
+    BT_ITCM float ReadSos(float d) const {
+        const size_t di = size_t(d);
+        const float f = d - float(di);
+        const size_t i1 = sosW_ >= di ? sosW_ - di : sosW_ + sosN_ - di;
+        if (f == 0.0f) return sos_[i1];  // a whole delay (301, overdub): the sample itself, as Hermite gives it
+        const size_t i0 = i1 + 1 == sosN_ ? 0 : i1 + 1;
+        const size_t i2 = i1 == 0 ? sosN_ - 1 : i1 - 1;
+        const size_t i3 = i2 == 0 ? sosN_ - 1 : i2 - 1;
+        return Hermite(sos_[i0], sos_[i1], sos_[i2], sos_[i3], f);
     }
 
     float fs_ = 0.0f;  // Init
@@ -486,6 +668,25 @@ private:
     Bbd bbdIn_;  // delay_bbd_scope all (ColorInput)
     bool bbdInLive_ = false;
     bool glideT_ = false;  // time changes glide (tape, BBD) or crossfade (digital)
+    // Sound on sound.
+    float* sos_ = nullptr;
+    size_t sosN_ = 8, sosW_ = 0;  // length, the slot about to be written
+    float sosMax_ = 5.0f;         // sosN_ - 3: the deepest SOS read
+    btctl::SosMode sosMode_ = btctl::SosMode::kOff;  // the last mode other than off
+    float sosOnT_ = 0.0f, m501T_ = 0.0f, mOdT_ = 0.0f, sosLevelT_ = 1.0f, sosFbT_ = 0.9f, sosTargetD_ = 2.0f;
+    bool sosJump_ = false;    // a mode change: the head crossfades even where it would glide
+    bool sosGlides_ = false;  // 501 on tape or BBD
+    bool sosLive_ = false;    // the head is on or fading: Process runs ProcessSos
+    float sosHead_[2] = {2.0f, 2.0f};
+    bool sosWob_[2] = {false, false};  // the head takes wow, flutter and the BBD clock LFO (501)
+    int sosActive_ = 0;
+    Crossfade sosFade_;  // from sosHead_[sosActive_] to the other head
+    Glide sosGlide_;     // the active head while gliding, at the control rate
+    GlideCoefs sosGc_;   // the glide laws at the control rate
+    float sosStep_ = 0.0f;       // the active head's per-sample move over this tick (its glide step / kControlInterval)
+    Ramp sosOn_, m501_, mOd_;    // delay_sos on, and the 501 and overdub weights, over kXfadeMs at the control rate
+    Smoother sosLevel_, sosFb_;  // over their parameters' smoothing, at the control rate
+    TickRamp sosOut_, sosFbIn_, sosKeep_;  // SetSosGains' gains, linear across each tick
 };
 
 }  // namespace btdsp

@@ -32,6 +32,8 @@ constexpr int MsBlocks(int ms) { return int(size_t(ms) * size_t(btdsp::kSampleRa
 constexpr int kWarmBlocks = MsBlocks(200), kRunBlocks = MsBlocks(2000), kNoiseBlocks = 64;
 constexpr int kSweepBlocks = MsBlocks(20);  // the sweeps' half period
 constexpr uint32_t kPassGapMs = 2000;
+constexpr btctl::DelayType kDelayTypes[] = {btctl::DelayType::kBbd, btctl::DelayType::kTape,
+                                            btctl::DelayType::kDigital};  // the bench order
 
 // The worst-case settings (daisy/README.md "Performance"; the device runs use the same list).
 constexpr struct {
@@ -47,7 +49,8 @@ constexpr struct {
     {btparam::kCanyonMasterDepth, 100}, {btparam::kCanyonFeedback, 100},  {btparam::kDelayType, 0},
     {btparam::kEqEnable, 1},            {btparam::kEqPosition, 1},         {btparam::kEqLowGain, 12},
     {btparam::kEqMidGain1, 12},         {btparam::kEqMidGain2, 12},        {btparam::kEqMidGain3, 12},
-    {btparam::kEqHighGain, 12},
+    {btparam::kEqHighGain, 12},         {btparam::kDelaySosMode, 2},       {btparam::kDelaySos, 1},
+    {btparam::kDelaySosRatio, 4},
 };
 
 btboard::Board hw;
@@ -73,6 +76,7 @@ BT_DTCM btctl::ToggleFilter gToggleFilter[3];
 BT_DTCM float gNoise[kBlockSize * kNoiseBlocks];
 BT_DTCM float gL[kBlockSize], gR[kBlockSize], gOut[kBlockSize];
 BT_SDRAM float gDelayMem[btdsp::kDelaySamples];
+BT_SDRAM float gSosMem[btdsp::kSosSamples];
 BT_SDRAM float gReverbSlow[btdsp::kReverbSlowFloats];
 BT_D2 float gReverbFast[btdsp::kReverbFastFloats];
 BT_SDRAM float gFastInSdram[btdsp::kReverbFastFloats];  // the alternative fast region
@@ -190,7 +194,11 @@ void stageDelay(const char* name, bool reverse, btctl::DelayType type, bool all 
     t.crush.mask = int(kParams[btparam::kDelayCrushMask].def);
     t.reverse = reverse;
     if (all) t.crushScope = t.tapeScope = t.bbdScope = 1.0f;
-    gDelay.Init(btdsp::kSampleRate, gDelayMem);
+    // 501 at ratio 4 behind the 2 s head: one more far SDRAM read stream, fed back.
+    t.sosMode = btctl::SosMode::k501;
+    t.sosOn = true;
+    t.sosRatio = 4.0f;
+    gDelay.Init(btdsp::kSampleRate, gDelayMem, btdsp::SosLine{gSosMem, btdsp::kSosSamples});
     gDelay.SetTargets(t);
     gDelay.Snap();
     timeStage(name, all ? blockDelayAll : blockDelay);
@@ -218,7 +226,8 @@ void stageEq(const char* name, bool sweep) {
 
 // The engine at the worst settings (the BBD, the heaviest delay type, at full color), SW1 = mode, SW3 = algo.
 void initEngine(int mode, int algo) {
-    gEngine.Init(btdsp::kSampleRate, gDelayMem, btdsp::ReverbPool{gReverbFast, gReverbSlow});
+    gEngine.Init(btdsp::kSampleRate, gDelayMem, btdsp::SosLine{gSosMem, btdsp::kSosSamples},
+                 btdsp::ReverbPool{gReverbFast, gReverbSlow});
     for (const auto& s : kWorst) gEngine.SetParam(s.id, s.v);
     gEngine.SetParam(btparam::kDelayMode, float(mode));
     gEngine.SetParam(btparam::kReverbAlgo, float(algo));
@@ -230,13 +239,13 @@ void runPass(unsigned pass) {
     timeStage("controls", blockControls);
 
     for (bool reverse : {false, true}) {
-        for (btctl::DelayType type : {btctl::DelayType::kBbd, btctl::DelayType::kTape, btctl::DelayType::kDigital}) {
+        for (btctl::DelayType type : kDelayTypes) {
             char name[32];
             snprintf(name, sizeof name, "delay %s %s", reverse ? "rev" : "fwd", btctl::Name(type));
             stageDelay(name, reverse, type);
         }
     }
-    for (btctl::DelayType type : {btctl::DelayType::kBbd, btctl::DelayType::kTape, btctl::DelayType::kDigital}) {
+    for (btctl::DelayType type : kDelayTypes) {
         char name[32];
         snprintf(name, sizeof name, "delay fwd %s all", btctl::Name(type));
         stageDelay(name, false, type, true);
@@ -271,7 +280,7 @@ void runPass(unsigned pass) {
     initEngine(0, 1);
     timeStage("engine sw3 switch", blockEngineSw3);
     // Knob 4 swept 10 <-> 2000 ms every 20 ms: tape and BBD glide, digital crossfades.
-    for (btctl::DelayType type : {btctl::DelayType::kBbd, btctl::DelayType::kTape, btctl::DelayType::kDigital}) {
+    for (btctl::DelayType type : kDelayTypes) {
         char name[40];
         snprintf(name, sizeof name, "engine time sweep %s", btctl::Name(type));
         initEngine(2, 1);

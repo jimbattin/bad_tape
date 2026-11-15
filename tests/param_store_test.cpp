@@ -1,5 +1,5 @@
 // daisy/src/param_store.h: knob/MIDI arbitration (pickup), toggle precedence, Space following SW3, links, knob
-// remapping and the FS2 secondaries.
+// remapping, the FS2 secondaries and the FS2 tap (delay_sos).
 #include "param_store.h"
 
 #include <gtest/gtest.h>
@@ -336,4 +336,68 @@ TEST(Store, NoneAssignmentDoesNothing) {
     r.knobs[1] = 0.9f;
     EXPECT_EQ(r.Update(), 0);
     for (uint8_t id = 0; id < kParamCount; ++id) EXPECT_EQ(r.s.Value(id), before[id]) << kParams[id].name;
+}
+
+namespace {
+
+// FS2 tap: press, then release.
+void Tap(Rig& r) {
+    r.shift = true;
+    r.Update();
+    r.shift = false;
+    r.Update();
+}
+
+}  // namespace
+
+TEST(Store, Fs2TapTogglesSos) {
+    Rig r;
+    r.s.SetFromMidi(kDelaySosMode, 1.0f, r.knobs);
+    Tap(r);
+    EXPECT_EQ(r.s.Value(kDelaySos), 1.0f);
+    Tap(r);
+    EXPECT_EQ(r.s.Value(kDelaySos), 0.0f);
+}
+
+TEST(Store, Fs2TapIgnoredWhenSosOff) {
+    Rig r;
+    r.s.SetFromMidi(kDelaySosMode, 0.0f, r.knobs);
+    Tap(r);
+    EXPECT_EQ(r.s.Value(kDelaySos), 0.0f);
+}
+
+TEST(Store, Fs2KnobMoveCancelsSos) {
+    Rig r;
+    r.s.SetFromMidi(kDelaySosMode, 1.0f, r.knobs);
+    r.shift = true;
+    r.Update();
+    r.knobs[3] += 0.05f;
+    r.Update();
+    r.shift = false;
+    r.Update();
+    EXPECT_EQ(r.s.Value(kDelaySos), 0.0f);
+}
+
+TEST(Store, Fs2KnobJitterStillToggles) {
+    Rig r;
+    r.s.SetFromMidi(kDelaySosMode, 1.0f, r.knobs);
+    r.shift = true;
+    r.Update();
+    r.knobs[3] += 0.02f;
+    r.Update();
+    r.shift = false;
+    r.Update();
+    EXPECT_EQ(r.s.Value(kDelaySos), 1.0f);
+}
+
+TEST(Store, Fs2ToggleMoveCancelsSos) {
+    Rig r;
+    r.s.SetFromMidi(kDelaySosMode, 1.0f, r.knobs);
+    r.shift = true;
+    r.Update();
+    r.toggles[1] = 2;
+    r.Update();
+    r.shift = false;
+    r.Update();
+    EXPECT_EQ(r.s.Value(kDelaySos), 0.0f);
 }
