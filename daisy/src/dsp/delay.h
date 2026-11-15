@@ -20,7 +20,10 @@
 // line in ColorInput); the BBD's clock LFO stays on the read head only.
 // Reverse (ReverseGrains): the heard wet crossfades between the forward and reverse reads over kXfadeMs (smoothstep);
 // forward skips the grains entirely. The caller decides the direction (the engine keeps the last one while SW1 is
-// off).
+// off). The SOS head reverses on its own grains over the SOS line, turning around where the head plays (overdub: at 2,
+// one pass newer), then in windows of delay_sos_length capped at SosRevMaxHop (301: 60.05 s; a longer length gets
+// 60.05 s windows and a shorter first grain, 53 ms at 120 s), the head's delay (501, wobbling) or half the loop
+// (overdub). The SOS line records forward, and the 501 feedback and the overdub keep take the forward head.
 // Sound on sound (delay_sos_mode, delay_sos): a second line (SosLine, caller-provided; 44 MiB of SDRAM on the Seed)
 // records what the loop writes, every sample in every mode, and one more head reads it into the wet, through the
 // same output-only colors as the repeats (bit inversion, tape bump and hiss). delay_sos fades the head in and out
@@ -28,10 +31,10 @@
 // delay time, wobbles and glides like the main head, and feeds back into the loop at the delay feedback. Overdub: the
 // head is delay_sos_length back and the line writes what the loop writes plus delay_sos_feedback x what the head
 // plays (soft limited), so switching on loops the last delay_sos_length and keeps layering. A length, ratio or mode
-// change crossfades the head (a 501 time change on tape or BBD glides it). Reverse reverses the main head only; SW1
-// off and bypass stop the input, and the SOS head keeps playing. With SOS off and faded out the output is
-// bit-identical to a delay without it. Live, the head runs out of line (ProcessSos); its ramps, smoothers and 501
-// glide step on the control tick (SosTick), its gains ramp linearly across each tick.
+// change crossfades the head (a 501 time change on tape or BBD glides it). SW1 off and bypass stop the input, and the
+// SOS head keeps playing in the last direction. With SOS off and faded out the output is bit-identical to a delay
+// without it. Live, the head runs out of line (ProcessSos); its ramps, smoothers and 501 glide step on the control
+// tick (SosTick), its gains ramp linearly across each tick.
 // Every update counts samples (per sample, or every kControlInterval samples), so the output does not depend on how the
 // caller splits its blocks. No libDaisy, no allocation.
 #pragma once
@@ -75,6 +78,10 @@ static_assert(2.0f * (btparam::kParams[btparam::kDelayTapeWow].max + btparam::kP
 constexpr size_t kSosSamples = size_t(11) << 20;
 static_assert(btparam::kParams[btparam::kDelaySosLength].max * kSampleRate + 3.0f <= float(kSosSamples),
               "the SOS line holds the longest length");
+// The longest SOS reverse window (301, 501) on a line of n samples: a grain reads at most 2 + 2 hop + 2 kRevMaxFade
+// <= n - 3 back. The Seed's line: 5 765 117 samples, 60.05 s at 96 kHz.
+constexpr long SosRevMaxHop(size_t n) { return std::max(1L, long((n - 5) / 2) - kRevMaxFade); }
+static_assert(SosRevMaxHop(kSosSamples) >= long(60.0f * kSampleRate), "301 reverses windows of at least 60 s");
 // Caller-owned memory for the SOS line: any length >= 8 samples; lengths and heads clamp to it.
 struct SosLine {
     float* mem;
@@ -92,7 +99,7 @@ BT_ITCM inline float Hermite(float x0, float x1, float x2, float x3, float f) {
 // Unity up to kLimitKnee, C1 at the knee, approaching 1.0, which it reaches at kLimitKnee + 3 (1 - kLimitKnee) = 2.0.
 BT_ITCM inline float SoftLimit(float v) {
     const float a = std::fabs(v);
-    if (a <= kLimitKnee) return v;
+    if (!Above(a, kLimitKnee)) return v;
     return std::copysign(kLimitKnee + (1.0f - kLimitKnee) * SoftClip((a - kLimitKnee) / (1.0f - kLimitKnee)), v);
 }
 
@@ -172,7 +179,8 @@ template <class S, size_t N>
 // time, at most kRevMaxHop samples); at a launch the new grain fades in and the old one out with equal-power gains
 // over min(maxFade, hop/2, kRevMaxFade). A shorter hop applies at once, a longer one from the next launch; a launch
 // waits for the running fade, so at most two grains play. Wow, flutter and the BBD clock LFO offset the grains too
-// (the caller's read mapping), dropouts scale them; they never glide.
+// (the caller's read mapping), dropouts scale them; they never glide. Reset(d) starts the next grain d back for the
+// rest of a window (until 2 + 2 hop, at least 1 sample); later grains start at 2.
 class ReverseGrains {
 public:
     // maxFade: the longest grain crossfade, samples.
@@ -181,15 +189,18 @@ public:
         hop_ = 2;
         Reset();
     }
-    // No grain playing; the next Process launches one.
-    BT_ITCM void Reset() {
+    // No grain playing; the next Process launches one, d samples back.
+    BT_ITCM void Reset(float d = 2.0f) {
         grain_[0].on = grain_[1].on = false;
         newest_ = 0;
         count_ = 0;
         fading_ = false;
         fade_.c = 1.0f;
         fade_.s = 0.0f;
+        first_ = d;
     }
+    // Both grains are off only between a Reset and the next Process.
+    BT_ITCM bool Idle() const { return !grain_[0].on && !grain_[1].on; }
     // The launch period, samples.
     BT_ITCM void SetHop(long hop) { hop_ = hop; }
 
@@ -234,7 +245,7 @@ private:
     // Starts a grain at the newest recorded sample; the previous one fades out over fadeLen_ samples.
     BT_ITCM void Launch() {
         const int k = newest_ ^ 1;
-        grain_[k] = Grain{2.0f, true};
+        grain_[k] = Grain{first_, true};
         newest_ = k;
         fadeLen_ = std::clamp(std::min(maxFade_, int(hop_ / 2)), 1, kRevMaxFade);
         const float dlt = kHalfPi / float(fadeLen_);
@@ -244,12 +255,14 @@ private:
         fade_.rs = std::sin(dlt);
         fadePos_ = 0;
         fading_ = true;
-        count_ = hop_;
+        count_ = std::max(1L, hop_ - long((first_ - 2.0f) * 0.5f));
+        first_ = 2.0f;
     }
 
     Grain grain_[2];
     int newest_ = 0;  // the grain launched last
     long count_ = 0, hop_ = 2;
+    float first_ = 2.0f;  // the next launch's depth (Reset)
     int maxFade_ = 1, fadeLen_ = 1, fadePos_ = 0;
     bool fading_ = false;
     Oscillator fade_;  // (c, s): the old and the new grain's gains, rotated by pi/2 / fadeLen_ per sample
@@ -266,6 +279,7 @@ public:
         sos_ = sos.mem;
         sosN_ = sos.samples;
         sosMax_ = float(sosN_ - 3);
+        sosRevMaxHop_ = SosRevMaxHop(sosN_);
         std::memset(sos_, 0, sosN_ * sizeof(float));
         sosW_ = 0;
         sosMode_ = btctl::SosMode::kOff;
@@ -286,6 +300,7 @@ public:
         tapeLine_ = Line{tapeBuf_, kTapeInputLine, 0};
         fadeLen_ = int(std::lround(kXfadeMs * fs_ / 1000.0f));
         grains_.Init(fadeLen_);
+        sosGrains_.Init(fadeLen_);
         gc_.Init(fs_);
         sosGc_.Init(fs_ / kControlInterval);
         ctl_ = 1;
@@ -338,6 +353,12 @@ public:
         sosTargetD_ = sosMode_ == btctl::SosMode::k501
                           ? std::clamp(t.sosRatio * targetD_, 2.0f, sosMax_)
                           : std::clamp(float(std::lround(t.sosLengthS * fs_)), 2.0f, sosMax_);
+        // SOS reverse windows: overdub half the loop (a grain spans one pass and the next starts at the same loop
+        // position one pass newer); 301 and 501 the head's delay, at most sosRevMaxHop_ (301 above 60.05 s reverses
+        // 60.05 s windows).
+        const long sosD = std::lround(sosTargetD_);
+        sosGrains_.SetHop(sosMode_ == btctl::SosMode::kOverdub ? std::max(1L, sosD / 2)
+                                                                : std::min(sosD, sosRevMaxHop_));
         sosGlides_ = glideT_ && sosMode_ == btctl::SosMode::k501;
         sosLevelT_ = t.sosLevel;
         sosFbT_ = t.sosFeedback;
@@ -378,6 +399,7 @@ public:
         in_.Init(fs_, kEnableRampS, inT_);
         rev_.Init(fs_, kXfadeMs * 1e-3f, revT_);
         grains_.Reset();
+        sosGrains_.Reset();
         SnapSosHeads();
         sosOn_.Init(ctlRate, kXfadeMs * 1e-3f, sosOnT_);
         m501_.Init(ctlRate, kXfadeMs * 1e-3f, m501T_);
@@ -421,15 +443,15 @@ public:
         if (!fade_.on) {
             if (glideT_) {
                 head_[active_] = glide_.Process(targetD_, gc_.a, gc_.b, kTapeGlideMaxRate, 1e-3f);
-            } else if (targetD_ != head_[active_]) {
+            } else if (!SameBits(targetD_, head_[active_])) {  // heads >= 2: same bits is equality
                 head_[active_ ^ 1] = targetD_;
                 fade_.Start(fadeLen_);
             }
         }
         const float boff = bbdLfo_.Process(head_[active_]);  // every sample: the LFO counts samples
-        const bool moved = tapeOn || boff != 0.0f;
+        const bool moved = tapeOn || !IsZero(boff);
         const float off = (tapeOn ? mod : 0.0f) + boff;
-        const auto pos = [&](float h) { return moved ? std::clamp(h + off, 2.0f, float(kDelaySamples - 3)) : h; };
+        const auto pos = [&](float h) { return moved ? Clamp(h + off, 2.0f, float(kDelaySamples - 3)) : h; };
         float wF = Read(pos(head_[active_]));
         if (fade_.on) {
             wF = fade_.Mix(wF, Read(pos(head_[active_ ^ 1])));
@@ -439,17 +461,20 @@ public:
             }
         }
         if (tapeOn) wF *= drop;
-        float w = wF;
-        if (revT_ > 0.0f || rev_.Value() > 0.0f) {  // a branch, not a zero gain: forward stays bit-identical
+        float w = wF, r = 0.0f;  // r: the direction ramp, 0 forward .. 1 reverse
+        if (IsPositive(revT_) || IsPositive(rev_.Value())) {  // a branch, not a zero gain: forward stays bit-identical
             float wR = grains_.Process([&](float d) { return Read(pos(d)); });
             if (tapeOn) wR *= drop;
-            const float r = rev_.Process(revT_);
+            r = rev_.Process(revT_);
             w = wF + SmoothStep(r) * (wR - wF);
-            if (r == 0.0f && revT_ == 0.0f) grains_.Reset();
+            if (IsZero(r) && IsZero(revT_)) {
+                grains_.Reset();
+                sosGrains_.Reset();
+            }
         }
         // SOS: idle, the loop is exactly the delay's own (a branch, not a zero gain, so the output stays bit-identical)
         // and the line just records; live, out of line (inlined, its registers cost the idle path ~25 ‰ on the bench).
-        if (sosLive_) return ProcessSos(g * x, fb, wF, w, bsc, moved, off);
+        if (sosLive_) return ProcessSos(g * x, fb, wF, w, bsc, moved, off, r);
         StoreSos(WriteLoop(g * x + fb * wF, bsc));
         return tape_.Playback(crush_.InvertBits(w));
     }
@@ -495,7 +520,7 @@ private:
     // v crossfaded by on (0..1) into stage b's output. b runs only while on > 0 and is reset when on falls to 0, so the
     // next switch-in starts from silence (live: b ran since its last reset).
     BT_ITCM static float ThroughBbd(Bbd& b, bool& live, float on, float v) {
-        if (on > 0.0f) {
+        if (IsPositive(on)) {
             live = true;
             return v + on * (b.Process(v) - v);
         }
@@ -525,15 +550,16 @@ private:
 
     // The rest of Process while SOS is live: gx the loop's input (g x), fb the feedback, wF the main forward read, w
     // the main wet, bsc the BBD scope, moved and off the main head's wobble (tape wow and flutter, the BBD clock LFO),
-    // applied to a 501 head. Returns the wet. Per sample only the head, its read and three linear gain steps; the rest
-    // is SosTick's, on Process's control ticks.
+    // applied to a 501 head, r the direction ramp (0 forward .. 1 reverse): the SOS wet crossfades between its forward
+    // head and its reverse grains like the main head. Returns the wet. Per sample only the head, its read, three linear
+    // gain steps and, in reverse, the grains; the rest is SosTick's, on Process's control ticks.
     [[gnu::noinline]] BT_ITCM float ProcessSos(float gx, float fb, float wF, float w, float bsc, bool moved,
-                                               float off) {
+                                               float off, float r) {
         if (ctl_ == kControlInterval) SosTick();  // Process ticked this sample
         const float gOut = sosOut_.Step(), gFb = sosFbIn_.Step(), gKeep = sosKeep_.Step();
         sosHead_[sosActive_] += sosStep_;
         const auto sp = [&](int k) {
-            return sosWob_[k] && moved ? std::clamp(sosHead_[k] + off, 2.0f, sosMax_) : sosHead_[k];
+            return sosWob_[k] && moved ? Clamp(sosHead_[k] + off, 2.0f, sosMax_) : sosHead_[k];
         };
         float s = ReadSos(sp(sosActive_));
         if (sosFade_.on) {
@@ -544,9 +570,19 @@ private:
                 sosStep_ = 0.0f;
             }
         }
-        const float v = WriteLoop(gx + fb * (wF + gFb * s), bsc);  // 501: the head feeds the loop
-        StoreSos(gKeep > 0.0f ? SoftLimit(v + gKeep * s) : v);  // overdub: the line keeps its loop
-        return tape_.Playback(crush_.InvertBits(w + gOut * s));
+        float heard = s;  // the SOS wet: the forward head, or crossfaded to the reverse grains by SW1's ramp
+        if (IsPositive(r)) {
+            // Fresh grains turn around where the head plays (overdub: at 2, the same loop position one pass newer,
+            // which keeps the grains on the loop's grid).
+            if (sosGrains_.Idle()) sosGrains_.Reset(sosMode_ == btctl::SosMode::kOverdub ? 2.0f : sosHead_[sosActive_]);
+            const bool wob = moved && sosMode_ == btctl::SosMode::k501;  // 501's grains wobble like its head
+            const float sR = sosGrains_.Process(
+                [&](float d) { return ReadSos(Min(wob ? Max(d + off, 2.0f) : d, sosMax_)); });
+            heard = s + SmoothStep(r) * (sR - s);
+        }
+        const float v = WriteLoop(gx + fb * (wF + gFb * s), bsc);  // 501: the forward head feeds the loop
+        StoreSos(IsPositive(gKeep) ? SoftLimit(v + gKeep * s) : v);  // overdub: the line keeps its forward loop
+        return tape_.Playback(crush_.InvertBits(w + gOut * heard));
     }
 
     // Once per control tick while live: the on/off, mode and level ramps, the gains' next targets (reached linearly over
@@ -558,6 +594,7 @@ private:
         sosKeep_.Snap();
         if (sosOnT_ == 0.0f && sosOn_.Value() == 0.0f) {
             sosLive_ = false;
+            sosGrains_.Reset();  // the next reverse switch-on turns around fresh
             sosStep_ = 0.0f;
             return;
         }
@@ -620,7 +657,7 @@ private:
         const size_t di = size_t(d);
         const float f = d - float(di);
         const size_t i1 = sosW_ >= di ? sosW_ - di : sosW_ + sosN_ - di;
-        if (f == 0.0f) return sos_[i1];  // a whole delay (301, overdub): the sample itself, as Hermite gives it
+        if (IsZero(f)) return sos_[i1];  // a whole delay (301, overdub): the sample itself, as Hermite gives it
         const size_t i0 = i1 + 1 == sosN_ ? 0 : i1 + 1;
         const size_t i2 = i1 == 0 ? sosN_ - 1 : i1 - 1;
         const size_t i3 = i2 == 0 ? sosN_ - 1 : i2 - 1;
@@ -674,6 +711,8 @@ private:
     float sosMax_ = 5.0f;         // sosN_ - 3: the deepest SOS read
     btctl::SosMode sosMode_ = btctl::SosMode::kOff;  // the last mode other than off
     float sosOnT_ = 0.0f, m501T_ = 0.0f, mOdT_ = 0.0f, sosLevelT_ = 1.0f, sosFbT_ = 0.9f, sosTargetD_ = 2.0f;
+    ReverseGrains sosGrains_;  // the SOS head's reverse read (SW1 down)
+    long sosRevMaxHop_ = 1;    // SosRevMaxHop(sosN_)
     bool sosJump_ = false;    // a mode change: the head crossfades even where it would glide
     bool sosGlides_ = false;  // 501 on tape or BBD
     bool sosLive_ = false;    // the head is on or fading: Process runs ProcessSos

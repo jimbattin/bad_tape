@@ -14,9 +14,9 @@
 // the chain's input after a pre EQ with all (the default: Delay::ColorInput), where the dry, the delay and every reverb
 // input take it; tape wow and flutter and the BBD clock LFO stay on the repeats. Tape and BBD glide the pitch on
 // a time change; digital crossfades. delay_mode reverse plays every repeat backwards in windows as long as the delay
-// time; forward and reverse crossfade at a switch. delay_mode off stops recording new input while the repeats ring out
-// in the last direction (the reverb keeps its input). Sound on sound (delay_sos_mode, delay_sos) adds one more head on
-// a long second line (delay.h) into the delay's wet.
+// time, and the SOS head backwards (delay.h); forward and reverse crossfade at a switch. delay_mode off stops recording
+// new input while the repeats ring out in the last direction (the reverb keeps its input). Sound on sound
+// (delay_sos_mode, delay_sos) adds one more head on a long second line (delay.h) into the delay's wet.
 //
 // Mixes: the delay mixed by delay_mix, then the reverb SW3 selects (reverb_algo: plate.h, hall.h or canyon.h) mixed by
 // reverb_mix. Both are equal-power: sqrt(1 - t) dry + sqrt(t) wet, t = delay_mix for knob 1 and t = reverb_mix ^

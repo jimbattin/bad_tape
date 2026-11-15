@@ -40,18 +40,6 @@ std::vector<float> Burst(size_t n, size_t s0, size_t len) {
     return x;
 }
 
-// Normalised correlation of a[0, n) (read backwards if reverseA) with b[0, n).
-double Corr(const float* a, const float* b, size_t n, bool reverseA) {
-    double ab = 0.0, aa = 0.0, bb = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        const double va = a[reverseA ? n - 1 - i : i], vb = b[i];
-        ab += va * vb;
-        aa += va * va;
-        bb += vb * vb;
-    }
-    return ab / std::sqrt(aa * bb);
-}
-
 }  // namespace
 
 TEST(Delay, ImpulseLandsAtSetTime) {

@@ -10,6 +10,10 @@
 //   BT_DTCM: a variable in DTCM (zero-wait data, not cached). Any initialiser works.
 //   BT_SDRAM: a variable in the external SDRAM (.sdram_bss). NOLOAD: startup neither initialises nor zeroes it, so
 //   its owner clears it (the delay line: btdsp::Delay::Init). No initialiser.
+//   BT_SDRAM_BANK: BT_SDRAM at the start of one of the SDRAM's four internal banks (16 MB each: the FMC maps the top
+//   address bits to the bank, and each bank keeps one row open). The delay line takes the last one, above the SOS
+//   line: its read and write streams no longer share a bank with the SOS line's (and no longer sit on the same D-cache
+//   sets: the two lines' write positions move in step), which took 25-35 permille off the reverse fades on the bench.
 //   BT_D2: a variable in D2 SRAM (.d2_bss), NOLOAD, cleared by its owner (btdsp::Engine::Init, and in slices on every
 //   SW3 switch).
 // ITCM and DTCM are linked to run in the TCMs and loaded in SRAM; memory.cpp copies them from their SRAM load image
@@ -24,10 +28,12 @@
 #define BT_ITCM __attribute__((section(BT_ITCM_SECTION(__COUNTER__))))
 #define BT_DTCM __attribute__((section(".dtcm_data")))
 #define BT_SDRAM __attribute__((section(".sdram_bss")))
+#define BT_SDRAM_BANK __attribute__((section(".sdram_bss"), aligned(1 << 24)))
 #define BT_D2 __attribute__((section(".d2_bss")))
 #else
 #define BT_ITCM
 #define BT_DTCM
 #define BT_SDRAM
+#define BT_SDRAM_BANK
 #define BT_D2
 #endif

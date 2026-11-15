@@ -72,7 +72,7 @@ BT_DTCM float gPeakAcc = 0.0f;  // input peak since the main loop last read gPea
 BT_DTCM btdsp::Engine gEngine;
 BT_DTCM uint32_t gSosBlink = 0;  // blocks since SOS went on (LED2 blinks)
 BT_DTCM uint32_t gParamSeen = 0xFFFFFFFFu;  // the gParamGen of the last gParam scan
-BT_SDRAM float gDelayMem[btdsp::kDelaySamples];
+BT_SDRAM_BANK float gDelayMem[btdsp::kDelaySamples];
 BT_SDRAM float gSosMem[btdsp::kSosSamples];
 BT_D2 float gReverbFast[btdsp::kReverbFastFloats];
 BT_SDRAM float gReverbSlow[btdsp::kReverbSlowFloats];

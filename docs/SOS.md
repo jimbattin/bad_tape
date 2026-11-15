@@ -41,6 +41,16 @@ The FS2 button in the editor's sidebar does the same as a tap.
 - **Overdub keep**: 0–100 %, how much of the loop survives each pass. At 100 % it never fades.
 - **Level**: 0–100 %, how loud SOS plays.
 
+## Reverse
+
+With SW1 down, SOS plays backwards too, from the moment you flip the switch: whatever SOS is playing turns around right where it is and plays backwards, then reversed chunks of your recent playing follow.
+
+- **301**: the chunks are as long as *Length*, up to 60 s. A longer Length still reaches the full Length back when you play forward, but reverses in 60 s chunks, and the turnaround at the flip gets shorter (just a moment at 120 s).
+- **501**: the chunks are as long as the 501 head's delay, and they wobble like the forward head (the tape's wow and flutter, the BBD's pitch drift).
+- **Overdub**: the loop plays backwards. What you play is still recorded forward, so flipping back to SW1 up plays the loop as you recorded it.
+
+SW1 in the middle keeps SOS playing in the last direction.
+
 ## Tips
 
 - In Overdub, put SW1 in the middle to stop adding new sound while the loop keeps playing.
