@@ -4,6 +4,17 @@ Old tape echoes had extra playback heads that could bring your playing back much
 
 A *head* is a point that plays back what was recorded a set time ago. A *loop* is a stretch of your playing that keeps repeating.
 
+## The footswitches
+
+The pedal has two footswitches. Their names go left to right as you look down at the pedal:
+
+|Name|Where|What it does|
+|---|---|---|
+|FS1|The left footswitch|Bypass: turns the pedal's effects on or off. LED1 is lit while they are on.|
+|FS2|The right footswitch|Sound on sound. Tap it to turn SOS on or off; hold it to give the knobs their FS2 settings (see "Tap or hold?").|
+
+This guide is mostly about FS2, the right one.
+
 ## Quick start
 
 1. Connect the pedal and open the editor.
@@ -11,13 +22,13 @@ A *head* is a point that plays back what was recorded a set time ago. A *loop* i
 
    ![Sound on sound section](sos-section.png)
 
-3. Play, then tap FS2. LED2 blinks while SOS is on.
+3. Play, then tap FS2 (the right footswitch). LED2 blinks while SOS is on.
 4. Tap FS2 again to turn it off.
 5. The mode is saved with Save, like any setting. SOS itself always starts off at power-up.
 
 ## Tap or hold?
 
-A quick tap and release of FS2 turns SOS on or off.
+A quick tap and release of FS2, the right footswitch, turns SOS on or off.
 
 Holding FS2 while you turn a knob changes that knob's FS2 setting instead, and SOS stays as it was. Out of the box, knob 4 (delay time) sets the SOS *Length* this way: hold FS2, turn knob 4, let go. Moving a toggle switch while FS2 is down also cancels the tap.
 
@@ -55,6 +66,6 @@ SW1 in the middle keeps SOS playing in the last direction.
 
 - In Overdub, put SW1 in the middle to stop adding new sound while the loop keeps playing.
 - SOS plays through the delay's wet signal, so knob 1 (delay mix) sets how much of it you hear.
-- SOS keeps playing when you bypass with FS1.
+- SOS keeps playing when you bypass with FS1 (the left footswitch).
 - A MIDI controller can switch SOS with CC 26 (values 64 and up mean on). See [MIDI.md](MIDI.md).
 - The 301 and 501 modes are named after the Roland RE-301 and RE-501 Space Echo, which had these heads.
